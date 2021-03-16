@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <package>
-  <name>cloud_msgs</name>
+  <name>sc_cloud_msgs</name>
   <version>1.0.0</version>
   <description>The cloud_msgs package contains messages.</description>
 

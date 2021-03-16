@@ -46,12 +46,62 @@
 #include "Scancontext.h"
 #include "utility.h"
 
+#include <pcl/io/pcd_io.h>
+#include <condition_variable>
+#include <unistd.h>
+vector<string> getFiles(string cate_dir)
+{
+    vector<string> files; //存放文件名
+    DIR *dir;
+    struct dirent *ptr;
+    char base[1000];
+
+    if ((dir = opendir(cate_dir.c_str())) == NULL)
+    {
+        perror("Open dir error...");
+        exit(1);
+    }
+
+    while ((ptr = readdir(dir)) != NULL)
+    {
+        if (strcmp(ptr->d_name, ".") == 0 || strcmp(ptr->d_name, "..") == 0) ///current dir OR parrent dir
+            continue;
+        else if (ptr->d_type == 8) ///file
+            //printf("d_name:%s/%s\n",basePath,ptr->d_name);
+            files.push_back(ptr->d_name);
+        else if (ptr->d_type == 10) ///link file
+            //printf("d_name:%s/%s\n",basePath,ptr->d_name);
+            continue;
+        else if (ptr->d_type == 4) ///dir
+        {
+            files.push_back(ptr->d_name);
+            /*
+		        memset(base,'\0',sizeof(base));
+		        strcpy(base,basePath);
+		        strcat(base,"/");
+		        strcat(base,ptr->d_nSame);
+		        readFileList(base);
+			*/
+        }
+    }
+    closedir(dir);
+
+    //排序，按从小到大排序
+    sort(files.begin(), files.end());
+    return files;
+}
+
 using namespace gtsam;
 
 class mapOptimization{
 
 private:
 
+    std::mutex mtx_cv;
+    std::condition_variable cv;
+    bool premap_processed;
+    bool sci_localized;
+    int localizeResultHost;
     NonlinearFactorGraph gtSAMgraph;
     Values initialEstimate;
     Values optimizedEstimate;
@@ -109,8 +159,9 @@ private:
     pcl::PointCloud<PointType>::Ptr surroundingKeyPoses;
     pcl::PointCloud<PointType>::Ptr surroundingKeyPosesDS;
 
-    pcl::PointCloud<PointType>::Ptr laserCloudRaw; 
-    pcl::PointCloud<PointType>::Ptr laserCloudRawDS; 
+    pcl::PointCloud<PointType>::Ptr laserCloudRaw;
+    double laserCloudRawTime;
+    pcl::PointCloud<PointType>::Ptr laserCloudRawDS;
     pcl::PointCloud<PointType>::Ptr laserCloudCornerLast; // corner feature set from odoOptimization
     pcl::PointCloud<PointType>::Ptr laserCloudSurfLast; // surf feature set from odoOptimization
     pcl::PointCloud<PointType>::Ptr laserCloudCornerLastDS; // downsampled corner featuer set from odoOptimization
@@ -238,8 +289,10 @@ public:
     mapOptimization():
         nh("~")
     {
-    	ISAM2Params parameters;
-		parameters.relinearizeThreshold = 0.01;
+        premap_processed = false;
+        sci_localized = false;
+        ISAM2Params parameters;
+        parameters.relinearizeThreshold = 0.01;
 		parameters.relinearizeSkip = 1;
     	isam = new ISAM2(parameters);
 
@@ -634,6 +687,7 @@ public:
     }
 
     void laserCloudRawHandler(const sensor_msgs::PointCloud2ConstPtr& msg){
+        laserCloudRawTime = msg->header.stamp.toSec();
         laserCloudRaw->clear();
         pcl::fromROSMsg(*msg, *laserCloudRaw);
     }
@@ -827,6 +881,17 @@ public:
 
 
     void loopClosureThread(){
+        if (initLocalizeFlag){
+            loadpremap();
+            while (true){
+                if (initLocalize()){
+                    std::cout << "initLocalize success!" << std::endl;
+                    break;
+                }  
+                else
+                    std::cout << "initLocalize failed. try again." << std::endl;
+            }
+        }
 
         if (loopClosureEnableFlag == false)
             return;
@@ -838,6 +903,37 @@ public:
         }
     } // loopClosureThread
 
+    void loadpremap(){
+        {
+            std::lock_guard<std::mutex> lock_1(mtx_cv);
+            std::string loadmap_path = getenv("HOME");
+            loadmap_path += "/catkin_ws/data/pre_map/";
+            vector<string> files = getFiles(loadmap_path);
+            std::string pcdpath;
+
+            for (int i = 1; i < initMapFrameNum;i++){
+                pcdpath = loadmap_path + files[i];
+                pcl::PointCloud<PointType>::Ptr loadRawCloudKeyFrame(new pcl::PointCloud<PointType>());
+                pcl::io::loadPCDFile(pcdpath, *loadRawCloudKeyFrame);
+                std::cout << "load " << pcdpath << std::endl;
+                scManager.makeAndSaveScancontextAndKeys(*loadRawCloudKeyFrame);
+            }
+            std::cout << "premap is processed. " << std::endl;
+            premap_processed = true;
+        }
+        cv.notify_one();
+    }
+
+    bool initLocalize(){
+        {
+            std::unique_lock<std::mutex> lock_2(mtx_cv);
+            cv.wait(lock_2, [&] { return sci_localized; });
+        }
+        if (localizeResultHost!=-1)
+            return true;
+        else
+            return false;
+    }
 
     bool detectLoopClosure(){
 
@@ -1627,7 +1723,27 @@ public:
         if( usingRawCloud ) { // v2 uses downsampled raw point cloud, more fruitful height information than using feature points (v1)
             pcl::PointCloud<PointType>::Ptr thisRawCloudKeyFrame(new pcl::PointCloud<PointType>());
             pcl::copyPointCloud(*laserCloudRawDS,  *thisRawCloudKeyFrame);
-            scManager.makeAndSaveScancontextAndKeys(*thisRawCloudKeyFrame);
+            if(initLocalizeFlag){
+                std::unique_lock<std::mutex> unilock(mtx_cv);
+                cv.wait(unilock, [&] { return premap_processed; });
+
+                scManager.makeAndSaveScancontextAndKeys(*thisRawCloudKeyFrame);
+                
+                auto localizeResult = scManager.detectLoopClosureID();
+                std::cout << "------ localizeResult.first: " << localizeResult.first << std::endl;
+                sci_localized = true;
+                localizeResultHost = localizeResult.first;
+                unilock.unlock();
+                cv.notify_one();
+            }
+            else{
+                scManager.makeAndSaveScancontextAndKeys(*thisRawCloudKeyFrame);
+                std::string rawDS_path = getenv("HOME");
+                rawDS_path += "/catkin_ws/data/pre_map/";
+                rawDS_path += to_string(laserCloudRawTime) + "_";
+                rawDS_path += to_string(cloudKeyPoses3D->points.size()) + "th_keyframe.pcd";
+                pcl::io::savePCDFileASCII(rawDS_path, *laserCloudRawDS);
+            }
         }
         else { // v1 uses thisSurfKeyFrame, it also works. (empirically checked at Mulran dataset sequences)
             scManager.makeAndSaveScancontextAndKeys(*thisSurfKeyFrame); 

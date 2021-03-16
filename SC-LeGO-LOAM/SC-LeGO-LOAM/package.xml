@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <package>
-  <name>lego_loam</name>
+  <name>sc_lego_loam</name>
   <version>1.0.0</version>
-  <description>LeGO-LOAM from IROS 2018</description>
+  <description>SC-LeGO-LOAM from IROS 2018</description>
 
   <maintainer email="xxx@xxx.xxx">Tixiao Shan</maintainer>
 
@@ -32,8 +32,8 @@
 
   <build_depend>std_msgs</build_depend>
   <run_depend>std_msgs</run_depend>
-  <build_depend>cloud_msgs</build_depend>
-  <run_depend>cloud_msgs</run_depend>
+  <build_depend>sc_cloud_msgs</build_depend>
+  <run_depend>sc_cloud_msgs</run_depend>
   <build_depend>sensors_msgs</build_depend>
   <run_depend>sensors_msgs</run_depend>
   <build_depend>geometry_msgs</build_depend>

@@ -1,0 +1,36 @@
+{
+    "configurations": [
+        {
+            "browse": {
+                "databaseFilename": "",
+                "limitSymbolsToIncludedHeaders": true
+            },
+            "includePath": [
+                "/home/ubuwgb/sc_legoloam_ws/devel/include/**",
+                "/home/ubuwgb/catkin_ws/devel/include/**",
+                "/opt/ros/kinetic/include/**",
+                "/home/ubuwgb/catkin_ws/src/apollo_readgnss/include/**",
+                "/home/ubuwgb/catkin_ws/src/detect_rain/include/**",
+                "/home/ubuwgb/sc_legoloam_ws/src/SC-LeGO-LOAM/SC-LeGO-LOAM/LeGO-LOAM/include/**",
+                "/home/ubuwgb/catkin_ws/src/loam_velodyne/include/**",
+                "/home/ubuwgb/catkin_ws/src/driver_lslidar/lslidar_c32_decoder/include/**",
+                "/home/ubuwgb/catkin_ws/src/driver_lslidar/lslidar_c32_driver/include/**",
+                "/home/ubuwgb/catkin_ws/src/preprocess_lslidar/include/**",
+                "/home/ubuwgb/catkin_ws/src/read_bridge/include/**",
+                "/home/ubuwgb/catkin_ws/src/read_odom/include/**",
+                "/home/ubuwgb/catkin_ws/src/readgps/include/**",
+                "/home/ubuwgb/catkin_ws/src/relocal/include/**",
+                "/home/ubuwgb/catkin_ws/src/tur/include/**",
+                "/home/ubuwgb/catkin_ws/src/usb_cam/include/**",
+                "/home/ubuwgb/catkin_ws/src/zcm-ros-bridge/include/**",
+                "/usr/include/**"
+            ],
+            "name": "ROS",
+            "intelliSenseMode": "gcc-x64",
+            "compilerPath": "/usr/bin/clang",
+            "cStandard": "c11",
+            "cppStandard": "c++17"
+        }
+    ],
+    "version": 4
+}
