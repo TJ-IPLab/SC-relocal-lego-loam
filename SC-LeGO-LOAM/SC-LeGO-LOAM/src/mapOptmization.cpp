@@ -102,6 +102,11 @@ private:
     bool premap_processed;
     bool sci_localized;
     int localizeResultHost;
+    bool initLocalizeFlag;
+    string initScene;
+    int initMapFrameNum;
+    std::string SceneFolder;
+
     NonlinearFactorGraph gtSAMgraph;
     Values initialEstimate;
     Values optimizedEstimate;
@@ -291,6 +296,8 @@ public:
     {
         premap_processed = false;
         sci_localized = false;
+        
+
         ISAM2Params parameters;
         parameters.relinearizeThreshold = 0.01;
 		parameters.relinearizeSkip = 1;
@@ -331,6 +338,18 @@ public:
         aftMappedTrans.child_frame_id_ = "/aft_mapped";
 
         allocateMemory();
+    }
+
+    void getRelocalParam(bool Flag, string Scene, int FrameNum){
+        initLocalizeFlag = Flag;
+        initScene = Scene;
+        initMapFrameNum = FrameNum;
+        SceneFolder = getenv("HOME");
+        SceneFolder += "/catkin_ws/data/pre_map/" + initScene + "/";
+        std::cout << "initLocalizeFlag: " << initLocalizeFlag << std::endl;
+        std::cout << "initScene: " << initScene << std::endl;
+        std::cout << "initMapFrameNum: " << initMapFrameNum << std::endl;
+        std::cout << "SceneFolder: " << SceneFolder << std::endl;
     }
 
     void allocateMemory(){
@@ -885,11 +904,11 @@ public:
             loadpremap();
             while (true){
                 if (initLocalize()){
-                    std::cout << "initLocalize success!" << std::endl;
+                    std::cout << "initLocalize success !!!" << std::endl;
                     break;
                 }  
-                else
-                    std::cout << "initLocalize failed. try again." << std::endl;
+                // else
+                //     std::cout << "initLocalize failed. try again." << std::endl;
             }
         }
 
@@ -906,19 +925,21 @@ public:
     void loadpremap(){
         {
             std::lock_guard<std::mutex> lock_1(mtx_cv);
-            std::string loadmap_path = getenv("HOME");
-            loadmap_path += "/catkin_ws/data/pre_map/";
-            vector<string> files = getFiles(loadmap_path);
+            vector<string> files = getFiles(SceneFolder);
             std::string pcdpath;
+            std::cout << "loading... please wait" << pcdpath << std::endl;
 
-            for (int i = 1; i < initMapFrameNum;i++){
-                pcdpath = loadmap_path + files[i];
+            for (int i = 0; i < initMapFrameNum;i++){
+                pcdpath = SceneFolder + files[i];
                 pcl::PointCloud<PointType>::Ptr loadRawCloudKeyFrame(new pcl::PointCloud<PointType>());
                 pcl::io::loadPCDFile(pcdpath, *loadRawCloudKeyFrame);
-                std::cout << "load " << pcdpath << std::endl;
+                // std::cout << "load " << pcdpath << std::endl;
                 scManager.makeAndSaveScancontextAndKeys(*loadRawCloudKeyFrame);
+                if (i % 50 == 0){
+                    std::cout << "load " << pcdpath << std::endl;
+                }
             }
-            std::cout << "premap is processed. " << std::endl;
+            std::cout << "premap is processed.   start localize... " << std::endl;
             premap_processed = true;
         }
         cv.notify_one();
@@ -1738,8 +1759,7 @@ public:
             }
             else{
                 scManager.makeAndSaveScancontextAndKeys(*thisRawCloudKeyFrame);
-                std::string rawDS_path = getenv("HOME");
-                rawDS_path += "/catkin_ws/data/pre_map/";
+                std::string rawDS_path = SceneFolder;
                 rawDS_path += to_string(laserCloudRawTime) + "_";
                 rawDS_path += to_string(cloudKeyPoses3D->points.size()) + "th_keyframe.pcd";
                 pcl::io::savePCDFileASCII(rawDS_path, *laserCloudRawDS);
@@ -1832,6 +1852,14 @@ int main(int argc, char** argv)
     ROS_INFO("\033[1;32m---->\033[0m Map Optimization Started.");
 
     mapOptimization MO;
+    ros::NodeHandle nh_getparam;
+    bool Flag;
+    string Scene;
+    int FrameNum;
+    nh_getparam.getParam("initLocalizeFlag", Flag);
+    nh_getparam.getParam("Scene", Scene);
+    nh_getparam.getParam("initMapFrameNum", FrameNum);
+    MO.getRelocalParam(Flag, Scene, FrameNum);
 
     std::thread loopthread(&mapOptimization::loopClosureThread, &MO);
     std::thread visualizeMapThread(&mapOptimization::visualizeGlobalMapThread, &MO);
