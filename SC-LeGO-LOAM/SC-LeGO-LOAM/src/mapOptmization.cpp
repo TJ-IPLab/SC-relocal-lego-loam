@@ -101,11 +101,15 @@ private:
     std::condition_variable cv;
     bool premap_processed;
     bool sci_localized;
-    int localizeResultHost;
+    int localizeResultIndex;
+    float YawDiff;
     bool initLocalizeFlag;
     string initScene;
     int initMapFrameNum;
+    vector<string> files;
     std::string SceneFolder;
+    int relocalHz;
+    int relocalNum;
 
     NonlinearFactorGraph gtSAMgraph;
     Values initialEstimate;
@@ -128,6 +132,7 @@ private:
     ros::Publisher pubIcpKeyFrames;
     ros::Publisher pubRecentKeyFrames;
     ros::Publisher pubRegisteredCloud;
+    ros::Publisher pubRelocalCloud;
 
     ros::Subscriber subLaserCloudRaw;
     ros::Subscriber subLaserCloudCornerLast;
@@ -296,7 +301,7 @@ public:
     {
         premap_processed = false;
         sci_localized = false;
-        
+        relocalNum = 10;
 
         ISAM2Params parameters;
         parameters.relinearizeThreshold = 0.01;
@@ -318,6 +323,7 @@ public:
         pubIcpKeyFrames = nh.advertise<sensor_msgs::PointCloud2>("/corrected_cloud", 2);
         pubRecentKeyFrames = nh.advertise<sensor_msgs::PointCloud2>("/recent_cloud", 2);
         pubRegisteredCloud = nh.advertise<sensor_msgs::PointCloud2>("/registered_cloud", 2);
+        pubRelocalCloud = nh.advertise<sensor_msgs::PointCloud2>("/relocal_cloud", 2);
 
         float filter_size;
         downSizeFilterCorner.setLeafSize(0.2, 0.2, 0.2);
@@ -340,16 +346,21 @@ public:
         allocateMemory();
     }
 
-    void getRelocalParam(bool Flag, string Scene, int FrameNum){
-        initLocalizeFlag = Flag;
+    void getRelocalParam(bool LocalizeFlag, string Scene, int FrameNum, double Threshold, int Hz){
+        initLocalizeFlag = LocalizeFlag;
         initScene = Scene;
         initMapFrameNum = FrameNum;
         SceneFolder = getenv("HOME");
         SceneFolder += "/catkin_ws/data/pre_map/" + initScene + "/";
+        scManager.setThres(Threshold);
+        relocalHz = Hz;
+
         std::cout << "initLocalizeFlag: " << initLocalizeFlag << std::endl;
         std::cout << "initScene: " << initScene << std::endl;
         std::cout << "initMapFrameNum: " << initMapFrameNum << std::endl;
         std::cout << "SceneFolder: " << SceneFolder << std::endl;
+        std::cout << "Threshold: " << Threshold << std::endl;
+        std::cout << "relocalHz: " << relocalHz << std::endl;
     }
 
     void allocateMemory(){
@@ -706,9 +717,48 @@ public:
     }
 
     void laserCloudRawHandler(const sensor_msgs::PointCloud2ConstPtr& msg){
+        relocalNum = relocalNum + relocalHz;
         laserCloudRawTime = msg->header.stamp.toSec();
         laserCloudRaw->clear();
         pcl::fromROSMsg(*msg, *laserCloudRaw);
+        laserCloudRawDS->clear();
+        downSizeFilterScancontext.setInputCloud(laserCloudRaw);
+        downSizeFilterScancontext.filter(*laserCloudRawDS);
+        pcl::PointCloud<PointType>::Ptr thisRawCloudKeyFrame(new pcl::PointCloud<PointType>());
+        pcl::copyPointCloud(*laserCloudRawDS,  *thisRawCloudKeyFrame);
+        if (initLocalizeFlag && relocalNum >= 10){
+            relocalNum = 0;
+            std::unique_lock<std::mutex> unilock(mtx_cv);
+            cv.wait(unilock, [&] { return premap_processed; });
+            // std::cout << "start detectRelocalID ..." << std::endl;
+            auto localizeResult = scManager.detectRelocalID(*thisRawCloudKeyFrame);
+            sci_localized = true;
+            localizeResultIndex = localizeResult.first;
+            YawDiff = localizeResult.second;
+            std::cout << "------ localizeResult.Index: " << localizeResultIndex;
+            std::cout << "------ localizeResult.YawDiff: " << YawDiff << std::endl;
+            unilock.unlock();
+            if (localizeResultIndex != -1){
+                std::string resultpath = SceneFolder + files[localizeResultIndex];
+                pcl::PointCloud<PointType>::Ptr resultpcd(new pcl::PointCloud<PointType>());
+                pcl::io::loadPCDFile(resultpath, *resultpcd);
+                for (int i = 0; i < resultpcd->points.size(); i++)
+                {
+                    auto x = resultpcd->points[i].x * cos(YawDiff) - resultpcd->points[i].y * sin(YawDiff);
+                    auto y = resultpcd->points[i].x * sin(YawDiff) + resultpcd->points[i].y * cos(YawDiff);
+                    resultpcd->points[i].x = x;
+                    resultpcd->points[i].y = y;
+                    resultpcd->points[i].z += 20;
+                }
+
+                sensor_msgs::PointCloud2 cloudMsgTemp;
+                pcl::toROSMsg(*resultpcd, cloudMsgTemp);
+                cloudMsgTemp.header.stamp = ros::Time().fromSec(laserCloudRawTime);
+                cloudMsgTemp.header.frame_id = "/velodyne";
+                pubRelocalCloud.publish(cloudMsgTemp);
+            }
+            // cv.notify_one();
+        }
     }
 
     void laserCloudCornerLastHandler(const sensor_msgs::PointCloud2ConstPtr& msg){
@@ -820,6 +870,52 @@ public:
         } 
     }
 
+    void RelocalThread(){
+        loadpremap();
+        // while (true){
+        //     if (initLocalize()){
+        //         std::cout << "initLocalize success !!!" << std::endl;
+        //         sci_localized = false;
+        //     }
+        //     // else
+        //     //     std::cout << "initLocalize failed. try again." << std::endl;
+        // }
+    }
+
+    void loadpremap(){
+        {
+            std::lock_guard<std::mutex> lock_1(mtx_cv);
+            files = getFiles(SceneFolder);
+            std::string pcdpath;
+            std::cout << "loading... please wait" << pcdpath << std::endl;
+
+            for (int i = 0; i < initMapFrameNum;i++){
+                pcdpath = SceneFolder + files[i];
+                pcl::PointCloud<PointType>::Ptr loadRawCloudKeyFrame(new pcl::PointCloud<PointType>());
+                pcl::io::loadPCDFile(pcdpath, *loadRawCloudKeyFrame);
+                // std::cout << "load " << pcdpath << std::endl;
+                scManager.makeAndSaveScancontextAndKeys(*loadRawCloudKeyFrame);
+                if (i % 50 == 0){
+                    std::cout << "load " << pcdpath << std::endl;
+                }
+            }
+            std::cout << "premap is processed.   start localize... " << std::endl;
+            premap_processed = true;
+        }
+        cv.notify_one();
+    }
+
+    bool initLocalize(){
+        {
+            std::unique_lock<std::mutex> lock_2(mtx_cv);
+            cv.wait(lock_2, [&] { return sci_localized; });
+        }
+        if (localizeResultIndex!=-1)
+            return true;
+        else
+            return false;
+    }
+
     void visualizeGlobalMapThread(){
         ros::Rate rate(0.2);
         while (ros::ok()){
@@ -900,17 +996,6 @@ public:
 
 
     void loopClosureThread(){
-        if (initLocalizeFlag){
-            loadpremap();
-            while (true){
-                if (initLocalize()){
-                    std::cout << "initLocalize success !!!" << std::endl;
-                    break;
-                }  
-                // else
-                //     std::cout << "initLocalize failed. try again." << std::endl;
-            }
-        }
 
         if (loopClosureEnableFlag == false)
             return;
@@ -921,40 +1006,6 @@ public:
             performLoopClosure();
         }
     } // loopClosureThread
-
-    void loadpremap(){
-        {
-            std::lock_guard<std::mutex> lock_1(mtx_cv);
-            vector<string> files = getFiles(SceneFolder);
-            std::string pcdpath;
-            std::cout << "loading... please wait" << pcdpath << std::endl;
-
-            for (int i = 0; i < initMapFrameNum;i++){
-                pcdpath = SceneFolder + files[i];
-                pcl::PointCloud<PointType>::Ptr loadRawCloudKeyFrame(new pcl::PointCloud<PointType>());
-                pcl::io::loadPCDFile(pcdpath, *loadRawCloudKeyFrame);
-                // std::cout << "load " << pcdpath << std::endl;
-                scManager.makeAndSaveScancontextAndKeys(*loadRawCloudKeyFrame);
-                if (i % 50 == 0){
-                    std::cout << "load " << pcdpath << std::endl;
-                }
-            }
-            std::cout << "premap is processed.   start localize... " << std::endl;
-            premap_processed = true;
-        }
-        cv.notify_one();
-    }
-
-    bool initLocalize(){
-        {
-            std::unique_lock<std::mutex> lock_2(mtx_cv);
-            cv.wait(lock_2, [&] { return sci_localized; });
-        }
-        if (localizeResultHost!=-1)
-            return true;
-        else
-            return false;
-    }
 
     bool detectLoopClosure(){
 
@@ -1744,26 +1795,11 @@ public:
         if( usingRawCloud ) { // v2 uses downsampled raw point cloud, more fruitful height information than using feature points (v1)
             pcl::PointCloud<PointType>::Ptr thisRawCloudKeyFrame(new pcl::PointCloud<PointType>());
             pcl::copyPointCloud(*laserCloudRawDS,  *thisRawCloudKeyFrame);
-            if(initLocalizeFlag){
-                std::unique_lock<std::mutex> unilock(mtx_cv);
-                cv.wait(unilock, [&] { return premap_processed; });
-
-                scManager.makeAndSaveScancontextAndKeys(*thisRawCloudKeyFrame);
-                
-                auto localizeResult = scManager.detectLoopClosureID();
-                std::cout << "------ localizeResult.first: " << localizeResult.first << std::endl;
-                sci_localized = true;
-                localizeResultHost = localizeResult.first;
-                unilock.unlock();
-                cv.notify_one();
-            }
-            else{
-                scManager.makeAndSaveScancontextAndKeys(*thisRawCloudKeyFrame);
-                std::string rawDS_path = SceneFolder;
-                rawDS_path += to_string(laserCloudRawTime) + "_";
-                rawDS_path += to_string(cloudKeyPoses3D->points.size()) + "th_keyframe.pcd";
-                pcl::io::savePCDFileASCII(rawDS_path, *laserCloudRawDS);
-            }
+            scManager.makeAndSaveScancontextAndKeys(*thisRawCloudKeyFrame);
+            std::string rawDS_path = SceneFolder;
+            rawDS_path += to_string(laserCloudRawTime) + "_";
+            rawDS_path += to_string(cloudKeyPoses3D->points.size()) + "th_keyframe.pcd";
+            pcl::io::savePCDFileASCII(rawDS_path, *laserCloudRawDS);
         }
         else { // v1 uses thisSurfKeyFrame, it also works. (empirically checked at Mulran dataset sequences)
             scManager.makeAndSaveScancontextAndKeys(*thisSurfKeyFrame); 
@@ -1853,30 +1889,53 @@ int main(int argc, char** argv)
 
     mapOptimization MO;
     ros::NodeHandle nh_getparam;
-    bool Flag;
+    bool LocalizeFlag;
     string Scene;
     int FrameNum;
-    nh_getparam.getParam("initLocalizeFlag", Flag);
+    double Threshold;
+    int Hz;
+    nh_getparam.getParam("initLocalizeFlag", LocalizeFlag);
     nh_getparam.getParam("Scene", Scene);
     nh_getparam.getParam("initMapFrameNum", FrameNum);
-    MO.getRelocalParam(Flag, Scene, FrameNum);
-
-    std::thread loopthread(&mapOptimization::loopClosureThread, &MO);
+    nh_getparam.getParam("Threshold", Threshold);
+    nh_getparam.getParam("relocalHz", Hz);
+    MO.getRelocalParam(LocalizeFlag, Scene, FrameNum, Threshold, Hz);
+  
     std::thread visualizeMapThread(&mapOptimization::visualizeGlobalMapThread, &MO);
+    if (LocalizeFlag){
+        std::thread RelocalThread(&mapOptimization::RelocalThread, &MO);
 
-    ros::Rate rate(200);
-    while (ros::ok())
-    // while ( 1 )
-    {
-        ros::spinOnce();
+        ros::Rate rate(200);
+        while (ros::ok())
+        // while ( 1 )
+        {
+            ros::spinOnce();
 
-        MO.run();
+            // MO.run();
 
-        rate.sleep();
+            rate.sleep();
+        }
+
+        visualizeMapThread.join();
+        RelocalThread.join();
     }
+    else{
+        std::thread loopthread(&mapOptimization::loopClosureThread, &MO);
 
-    loopthread.join();
-    visualizeMapThread.join();
+        ros::Rate rate(200);
+        while (ros::ok())
+        // while ( 1 )
+        {
+            ros::spinOnce();
+
+            MO.run();
+
+            rate.sleep();
+        }
+
+        visualizeMapThread.join();
+        loopthread.join();
+    }
 
     return 0;
 }

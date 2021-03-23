@@ -70,7 +70,9 @@ public:
 
     // User-side API
     void makeAndSaveScancontextAndKeys( pcl::PointCloud<SCPointType> & _scan_down );
-    std::pair<int, float> detectLoopClosureID( void ); // int: nearest node index, float: relative yaw  
+    std::pair<int, float> detectLoopClosureID( void ); // int: nearest node index, float: relative yaw
+    void setThres(double thres);
+    std::pair<int, float> detectRelocalID( pcl::PointCloud<SCPointType> & _scan_down ); // int: nearest node index, float: relative yaw
 
 public:
     // hyper parameters ()
@@ -89,7 +91,7 @@ public:
     // loop thres
     const double SEARCH_RATIO = 0.1; // for fast comparison, no Brute-force, but search 10 % is okay. // not was in the original conf paper, but improved ver.
     // const double SC_DIST_THRES = 0.13; // empirically 0.1-0.2 is fine (rare false-alarms) for 20x60 polar context (but for 0.15 <, DCS or ICP fit score check (e.g., in LeGO-LOAM) should be required for robustness)
-    const double SC_DIST_THRES = 0.45; // 0.4-0.6 is good choice for using with robust kernel (e.g., Cauchy, DCS) + icp fitness threshold / if not, recommend 0.1-0.15
+    double SC_DIST_THRES = 0.45; // 0.4-0.6 is good choice for using with robust kernel (e.g., Cauchy, DCS) + icp fitness threshold / if not, recommend 0.1-0.15
 
     // config 
     const int    TREE_MAKING_PERIOD_ = 10; // i.e., remaking tree frequency, to avoid non-mandatory every remaking, to save time cost / in the LeGO-LOAM integration, it is synchronized with the loop detection callback (which is 1Hz) so it means the tree is updated evrey 10 sec. But you can use the smaller value because it is enough fast ~ 5-50ms wrt N.
