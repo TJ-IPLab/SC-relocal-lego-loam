@@ -9,7 +9,7 @@
     <param name="/relocalHz" value="1" />
 
     <!--- Run Rviz-->
-    <node pkg="rviz" type="rviz" name="rviz" args="-d $(find lego_loam)/launch/relocal.rviz" />
+    <node pkg="rviz" type="rviz" name="rviz" args="-d $(find sc_lego_loam)/launch/relocal.rviz" />
 
     <!--- TF -->
     <node pkg="tf" type="static_transform_publisher" name="camera_init_to_map"  args="0 0 0 1.570795   0        1.570795 /map    /camera_init 10" />

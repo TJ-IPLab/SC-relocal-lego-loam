@@ -71,7 +71,7 @@ private:
     float startOrientation;
     float endOrientation;
 
-    cloud_msgs::cloud_info segMsg; // info of segmented cloud
+    sc_cloud_msgs::cloud_info segMsg; // info of segmented cloud
     std_msgs::Header cloudHeader;
 
     std::vector<std::pair<int8_t, int8_t> > neighborIterator; // neighbor iterator for segmentaiton process
@@ -94,7 +94,7 @@ public:
         pubGroundCloud = nh.advertise<sensor_msgs::PointCloud2> ("/ground_cloud", 1);
         pubSegmentedCloud = nh.advertise<sensor_msgs::PointCloud2> ("/segmented_cloud", 1);
         pubSegmentedCloudPure = nh.advertise<sensor_msgs::PointCloud2> ("/segmented_cloud_pure", 1);
-        pubSegmentedCloudInfo = nh.advertise<cloud_msgs::cloud_info> ("/segmented_cloud_info", 1);
+        pubSegmentedCloudInfo = nh.advertise<sc_cloud_msgs::cloud_info> ("/segmented_cloud_info", 1);
         pubOutlierCloud = nh.advertise<sensor_msgs::PointCloud2> ("/outlier_cloud", 1);
 
         nanPoint.x = std::numeric_limits<float>::quiet_NaN();
