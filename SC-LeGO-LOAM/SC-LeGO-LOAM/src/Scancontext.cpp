@@ -68,6 +68,8 @@ std::vector<float> eig2stdvec( MatrixXd _eigmat )
 
 double SCManager::distDirectSC ( MatrixXd &_sc1, MatrixXd &_sc2 )
 {
+    // todo: threshold to determine if this frame is sparse
+    // todo: when pointcloud to matrix, generate the best according to the existed one
     int num_eff_cols = 0; // i.e., to exclude all-nonzero sector
     double sum_sector_similarity = 0;
     for ( int col_idx = 0; col_idx < _sc1.cols(); col_idx++ )
@@ -89,6 +91,43 @@ double SCManager::distDirectSC ( MatrixXd &_sc1, MatrixXd &_sc2 )
 
 } // distDirectSC
 
+double SCManager::distDirectSC_correct ( MatrixXd &_sc1, MatrixXd &_sc2 )
+{
+    // todo: threshold to determine if this frame is sparse
+    // todo: when pointcloud to matrix, generate the best according to the existed one
+    int num_eff_cols = 0; // i.e., to exclude all-nonzero sector
+    double sum_sector_similarity = 0;
+    for ( int col_idx = 0; col_idx < _sc1.cols(); col_idx++ )
+    {
+        VectorXd col_sc1 = _sc1.col(col_idx);
+        VectorXd col_sc2 = _sc2.col(col_idx);
+        VectorXd coldiff = col_sc1 - col_sc2;
+        std::vector<float> coldiff_vec = eig2stdvec( coldiff );
+        for (int i = int(PC_NUM_RING / 2); i < coldiff_vec.size(); i++)
+        {
+            if (abs(coldiff_vec[i]) > HEIGHT_DIFF)
+            {
+                if (_sc1(i, (col_idx + 1) % PC_NUM_SECTOR) == _sc2(i, col_idx) || _sc1(i, (col_idx - 1 + PC_NUM_SECTOR) % PC_NUM_SECTOR) == _sc2(i, col_idx))
+                {
+                    // cout << "with HEIGHT_DIFF:" << HEIGHT_DIFF << ", neighbor re-search is successfully detected, at (" << i << ", " << col_idx << ")\n";
+                    col_sc1(i) = col_sc2(i);
+                }
+            }
+        }
+
+        if( col_sc1.norm() == 0 | col_sc2.norm() == 0 )
+            continue; // don't count this sector pair. 
+
+        double sector_similarity = col_sc1.dot(col_sc2) / (col_sc1.norm() * col_sc2.norm());
+
+        sum_sector_similarity = sum_sector_similarity + sector_similarity;
+        num_eff_cols = num_eff_cols + 1;
+    }
+    
+    double sc_sim = sum_sector_similarity / num_eff_cols;
+    return 1.0 - sc_sim;
+
+} // distDirectSC_correct
 
 int SCManager::fastAlignUsingVkey( MatrixXd & _vkey1, MatrixXd & _vkey2)
 {
@@ -147,6 +186,40 @@ std::pair<double, int> SCManager::distanceBtnScanContext( MatrixXd &_sc1, Matrix
 
 } // distanceBtnScanContext
 
+std::pair<double, int> SCManager::distanceBtnScanContext( MatrixXd &_sc1, MatrixXd &_sc2, pcl::PointCloud<SCPointType>& raw_cloud )
+{
+    // 1. fast align using variant key (not in original IROS18)
+    MatrixXd vkey_sc1 = makeSectorkeyFromScancontext( _sc1 );
+    MatrixXd vkey_sc2 = makeSectorkeyFromScancontext( _sc2 );
+    int argmin_vkey_shift = fastAlignUsingVkey( vkey_sc1, vkey_sc2 );
+
+    const int SEARCH_RADIUS = round( 0.5 * SEARCH_RATIO * _sc1.cols() ); // a half of search range 
+    std::vector<int> shift_idx_search_space { argmin_vkey_shift };
+    for ( int ii = 1; ii < SEARCH_RADIUS + 1; ii++ )
+    {
+        shift_idx_search_space.push_back( (argmin_vkey_shift + ii + _sc1.cols()) % _sc1.cols() );
+        shift_idx_search_space.push_back( (argmin_vkey_shift - ii + _sc1.cols()) % _sc1.cols() );
+    }
+    std::sort(shift_idx_search_space.begin(), shift_idx_search_space.end());
+
+    // 2. fast columnwise diff 
+    int argmin_shift = 0;
+    double min_sc_dist = 10000000;
+    for ( int num_shift: shift_idx_search_space )
+    {
+        MatrixXd sc2_shifted = circshift(_sc2, num_shift);
+        double cur_sc_dist = distDirectSC_correct( _sc1, sc2_shifted );
+        // double cur_sc_dist = distDirectSC( _sc1, sc2_shifted );
+        if( cur_sc_dist < min_sc_dist )
+        {
+            argmin_shift = num_shift;
+            min_sc_dist = cur_sc_dist;
+        }
+    }
+
+    return make_pair(min_sc_dist, argmin_shift);
+
+} // distanceBtnScanContext
 
 MatrixXd SCManager::makeScancontext( pcl::PointCloud<SCPointType> & _scan_down )
 {
@@ -396,7 +469,7 @@ std::pair<int, float> SCManager::detectRelocalID( pcl::PointCloud<SCPointType> &
     for ( int candidate_iter_idx = 0; candidate_iter_idx < NUM_CANDIDATES_FROM_TREE; candidate_iter_idx++ )
     {
         MatrixXd polarcontext_candidate = polarcontexts_[ candidate_indexes[candidate_iter_idx] ];
-        std::pair<double, int> sc_dist_result = distanceBtnScanContext( curr_desc, polarcontext_candidate ); 
+        std::pair<double, int> sc_dist_result = distanceBtnScanContext( curr_desc, polarcontext_candidate, _scan_down); 
         
         double candidate_dist = sc_dist_result.first;
         int candidate_align = sc_dist_result.second;
@@ -426,12 +499,15 @@ std::pair<int, float> SCManager::detectRelocalID( pcl::PointCloud<SCPointType> &
     else
     {
         std::cout.precision(3); 
-        cout << "[Not Relocalize] Nearest distance: " << min_dist << "between current pointcloud and " << nn_idx << "." << endl;
+        cout << "[Not Relocalize] Nearest distance: " << min_dist << " between current pointcloud and " << nn_idx << "." << endl;
         cout << "[Not Relocalize] yaw diff: " << nn_align * PC_UNIT_SECTORANGLE << " deg." << endl;
     }
 
     // To do: return also nn_align (i.e., yaw diff)
     float yaw_diff_rad = deg2rad(nn_align * PC_UNIT_SECTORANGLE);
+    if (loop_id == -1){
+        yaw_diff_rad = yaw_diff_rad + nn_idx * 1000;
+    }
     std::pair<int, float> result {loop_id, yaw_diff_rad};
 
     return result;

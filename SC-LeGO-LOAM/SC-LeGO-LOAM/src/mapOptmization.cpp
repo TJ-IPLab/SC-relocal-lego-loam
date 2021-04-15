@@ -133,6 +133,7 @@ private:
     ros::Publisher pubRecentKeyFrames;
     ros::Publisher pubRegisteredCloud;
     ros::Publisher pubRelocalCloud;
+    ros::Publisher pubRelocalFailCloud;
 
     ros::Subscriber subLaserCloudRaw;
     ros::Subscriber subLaserCloudCornerLast;
@@ -324,6 +325,7 @@ public:
         pubRecentKeyFrames = nh.advertise<sensor_msgs::PointCloud2>("/recent_cloud", 2);
         pubRegisteredCloud = nh.advertise<sensor_msgs::PointCloud2>("/registered_cloud", 2);
         pubRelocalCloud = nh.advertise<sensor_msgs::PointCloud2>("/relocal_cloud", 2);
+        pubRelocalFailCloud = nh.advertise<sensor_msgs::PointCloud2>("/relocal_fail_cloud", 2);
 
         float filter_size;
         downSizeFilterCorner.setLeafSize(0.2, 0.2, 0.2);
@@ -735,10 +737,10 @@ public:
             sci_localized = true;
             localizeResultIndex = localizeResult.first;
             YawDiff = localizeResult.second;
-            std::cout << "------ localizeResult.Index: " << localizeResultIndex;
-            std::cout << "------ localizeResult.YawDiff: " << YawDiff << std::endl;
             unilock.unlock();
             if (localizeResultIndex != -1){
+                std::cout << "------ localizeResult.Index: " << localizeResultIndex;
+                std::cout << "------ localizeResult.YawDiff: " << YawDiff << std::endl;
                 std::string resultpath = SceneFolder + files[localizeResultIndex];
                 pcl::PointCloud<PointType>::Ptr resultpcd(new pcl::PointCloud<PointType>());
                 pcl::io::loadPCDFile(resultpath, *resultpcd);
@@ -756,6 +758,29 @@ public:
                 cloudMsgTemp.header.stamp = ros::Time().fromSec(laserCloudRawTime);
                 cloudMsgTemp.header.frame_id = "/velodyne";
                 pubRelocalCloud.publish(cloudMsgTemp);
+            }
+            else{
+                localizeResultIndex = int(YawDiff / 1000);
+                YawDiff = YawDiff - localizeResultIndex * 1000;
+                std::cout << "------ FAIL localizeResult.Index: " << localizeResultIndex;
+                std::cout << "------ FAIL localizeResult.YawDiff: " << YawDiff << std::endl;
+                std::string resultpath = SceneFolder + files[localizeResultIndex];
+                pcl::PointCloud<PointType>::Ptr resultpcd(new pcl::PointCloud<PointType>());
+                pcl::io::loadPCDFile(resultpath, *resultpcd);
+                for (int i = 0; i < resultpcd->points.size(); i++)
+                {
+                    auto x = resultpcd->points[i].x * cos(YawDiff) - resultpcd->points[i].y * sin(YawDiff);
+                    auto y = resultpcd->points[i].x * sin(YawDiff) + resultpcd->points[i].y * cos(YawDiff);
+                    resultpcd->points[i].x = x;
+                    resultpcd->points[i].y = y;
+                    resultpcd->points[i].z += 20;
+                }
+
+                sensor_msgs::PointCloud2 cloudMsgTemp;
+                pcl::toROSMsg(*resultpcd, cloudMsgTemp);
+                cloudMsgTemp.header.stamp = ros::Time().fromSec(laserCloudRawTime);
+                cloudMsgTemp.header.frame_id = "/velodyne";
+                pubRelocalFailCloud.publish(cloudMsgTemp);
             }
             // cv.notify_one();
         }

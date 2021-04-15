@@ -66,7 +66,9 @@ public:
 
     int fastAlignUsingVkey ( MatrixXd & _vkey1, MatrixXd & _vkey2 ); 
     double distDirectSC ( MatrixXd &_sc1, MatrixXd &_sc2 ); // "d" (eq 5) in the original paper (IROS 18)
+    double distDirectSC_correct ( MatrixXd &_sc1, MatrixXd &_sc2 ); // sometimes correct the value between two cols
     std::pair<double, int> distanceBtnScanContext ( MatrixXd &_sc1, MatrixXd &_sc2 ); // "D" (eq 6) in the original paper (IROS 18)
+    std::pair<double, int> distanceBtnScanContext ( MatrixXd &_sc1, MatrixXd &_sc2, pcl::PointCloud<SCPointType>& raw_cloud );
 
     // User-side API
     void makeAndSaveScancontextAndKeys( pcl::PointCloud<SCPointType> & _scan_down );
@@ -83,6 +85,9 @@ public:
     const double PC_MAX_RADIUS = 80.0; // 80 meter max in the original paper (IROS 18)
     const double PC_UNIT_SECTORANGLE = 360.0 / double(PC_NUM_SECTOR);
     const double PC_UNIT_RINGGAP = PC_MAX_RADIUS / double(PC_NUM_RING);
+
+    // neighbor re-search
+    const double HEIGHT_DIFF = 10.0;
 
     // tree
     const int    NUM_EXCLUDE_RECENT = 50; // simply just keyframe gap, but node position distance-based exclusion is ok. 
