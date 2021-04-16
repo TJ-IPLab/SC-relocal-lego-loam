@@ -2,12 +2,11 @@
 #include "opencv2/opencv.hpp"
 #include "iostream"
 
-
 int count = 0;
 const int scale = 10;
 const float maxz = 23.7;
 
-cv::Mat SCManager::createSci (Eigen::MatrixXd &scsc)
+cv::Mat createSci (Eigen::MatrixXd &scsc)
 {
     int a = scsc.rows()*scale, b = scsc.cols()*scale;
     cv::Mat sc = cv::Mat(a,b,CV_8UC1);  
@@ -38,20 +37,6 @@ cv::Mat SCManager::createSci (Eigen::MatrixXd &scsc)
     return sci;
 }
 
-cv::Mat SCManager::addAxes(cv::Mat &sci,std::string title)
-{
-    DrawAxes drawAxes;      
-    cv::Mat ImageAddAxes = cv::Mat(sci.rows+100, sci.cols+70, CV_8UC3, cv::Scalar(255,255,255));
-    drawAxes.InputFigure(sci, ImageAddAxes);
-    std::string ylabel = "Ring(radius:0-80m)";
-	std::string xlabel = "Sector(anti-clock)";
-	std::string title_name = title;
-	drawAxes.DrawLabel_Y(ylabel, 20, 0, 4, cv::Scalar(0, 0, 0));
-	drawAxes.DrawLabel_X(xlabel, 0, 60, 6, cv::Scalar(0, 0, 0));
-	drawAxes.DrawTitle(title_name);
-    return ImageAddAxes;
-}
-
 MatrixXd SCManager::makeTransformScancontext( pcl::PointCloud<SCPointType> & _scan_down, int trans_x, int trans_y )
 {
     TicToc t_making_desc;
@@ -66,8 +51,8 @@ MatrixXd SCManager::makeTransformScancontext( pcl::PointCloud<SCPointType> & _sc
     int ring_idx, sctor_idx;
     for (int pt_idx = 0; pt_idx < num_pts_scan_down; pt_idx++)
     {
-        pt.x = _scan_down.points[pt_idx].x - trans_x; 
-        pt.y = _scan_down.points[pt_idx].y - trans_y;
+        pt.x = _scan_down.points[pt_idx].x+trans_x; 
+        pt.y = _scan_down.points[pt_idx].y+trans_y;
         pt.z = _scan_down.points[pt_idx].z + LIDAR_HEIGHT; // naive adding is ok (all points should be > 0).
 
         if(pt.z < 0)
@@ -515,44 +500,14 @@ std::pair<int, float> SCManager::detectRelocalID( pcl::PointCloud<SCPointType> &
      * loop threshold check
      */
 
-//--------------------------------------------transform------------------------------------------------------------
-/**    
-    cout<<"save is start"<<endl;
-    
-    std::string path = "/home/zeng/catkin_ws/data/original.pcd";
-    pcl::io::savePCDFileASCII(path, _scan_down);
-
-    for(int i = 0; i <21; ++i)
-    {
-        Eigen::MatrixXd sc_transform_x = makeTransformScancontext(_scan_down, i,0);
-        Eigen::MatrixXd sc_transform_y = makeTransformScancontext(_scan_down, 0,i);
-        Eigen::MatrixXd sc_transform_xy = makeTransformScancontext(_scan_down, i,i);
-        cv::Mat sci_transform_x = createSci(sc_transform_x);
-        cv::Mat sci_transform_y = createSci(sc_transform_y);
-        cv::Mat sci_transform_xy = createSci(sc_transform_xy);
-        char name_x[100],name_y[100],name_xy[100];
-        sprintf(name_x,"/home/zeng/catkin_ws/data/transform_x/x+%d.jpg",i);
-        sprintf(name_y,"/home/zeng/catkin_ws/data/transform_y/y+%d.jpg",i);
-        sprintf(name_xy,"/home/zeng/catkin_ws/data/transform_xy/x+%d,y+%d.jpg",i,i);
-        cv::imwrite(name_x,sci_transform_x);
-        cv::imwrite(name_y,sci_transform_y);
-        cv::imwrite(name_xy,sci_transform_xy);
-    }
-    cout<<"save is finish"<<endl;
-**/
-//-----------------------------------------transform------------------------------------------------------------
-
 // --------------------------------------------------create sc image--------------------------------------
 
     cv::Mat sciForRedPoint = createSci(sc);
-    cv::Mat sciForRedPointAddAxes = addAxes(sciForRedPoint,"     red point");
-
     Eigen::MatrixXd scShift = circshift(polarcontexts_[nn_idx],nn_align);
     cv::Mat sciForWhitePoint = createSci(scShift);
-    cv::Mat sciForWhitePointAddAxes = addAxes(sciForWhitePoint,"     white point");
 
-    cv::imshow("red point",sciForRedPointAddAxes);
-    cv::imshow("white point",sciForWhitePointAddAxes);
+    cv::imshow("red point",sciForRedPoint);
+    cv::imshow("white point",sciForWhitePoint);
     cv::waitKey(1);
 
 // --------------------------------------------------create sc image--------------------------------------

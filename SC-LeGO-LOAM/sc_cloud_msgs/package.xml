@@ -2,7 +2,7 @@
 <package>
   <name>sc_cloud_msgs</name>
   <version>1.0.0</version>
-  <description>The cloud_msgs package contains messages.</description>
+  <description>The sc_cloud_msgs package contains messages.</description>
 
   <maintainer email="xxx@xxx.xxx">Tixiao Shan</maintainer>
 

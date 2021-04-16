@@ -2,12 +2,12 @@
 #include "opencv2/opencv.hpp"
 #include "iostream"
 
-
 int count = 0;
-const int scale = 10;
+const int scale = 2;
 const float maxz = 23.7;
+const double angle = 15/180*3.141592653;
 
-cv::Mat SCManager::createSci (Eigen::MatrixXd &scsc)
+cv::Mat createSci (Eigen::MatrixXd &scsc)
 {
     int a = scsc.rows()*scale, b = scsc.cols()*scale;
     cv::Mat sc = cv::Mat(a,b,CV_8UC1);  
@@ -26,7 +26,7 @@ cv::Mat SCManager::createSci (Eigen::MatrixXd &scsc)
     for (int i = 0; i < scsc.rows(); i++)
     for (int j = 0; j < scsc.cols(); j++)
     {
-        uchar pixel=floor(255*scsc(i,j)/maxz);
+        uchar pixel=scsc(i,j);
         for (int u = i*scale;u < (i+1)*scale;u++)
         for (int v = j*scale;v < (j+1)*scale;v++)
         {
@@ -36,68 +36,6 @@ cv::Mat SCManager::createSci (Eigen::MatrixXd &scsc)
     cv::Mat sci;
     cv::applyColorMap(sc,sci,cv::COLORMAP_JET);
     return sci;
-}
-
-cv::Mat SCManager::addAxes(cv::Mat &sci,std::string title)
-{
-    DrawAxes drawAxes;      
-    cv::Mat ImageAddAxes = cv::Mat(sci.rows+100, sci.cols+70, CV_8UC3, cv::Scalar(255,255,255));
-    drawAxes.InputFigure(sci, ImageAddAxes);
-    std::string ylabel = "Ring(radius:0-80m)";
-	std::string xlabel = "Sector(anti-clock)";
-	std::string title_name = title;
-	drawAxes.DrawLabel_Y(ylabel, 20, 0, 4, cv::Scalar(0, 0, 0));
-	drawAxes.DrawLabel_X(xlabel, 0, 60, 6, cv::Scalar(0, 0, 0));
-	drawAxes.DrawTitle(title_name);
-    return ImageAddAxes;
-}
-
-MatrixXd SCManager::makeTransformScancontext( pcl::PointCloud<SCPointType> & _scan_down, int trans_x, int trans_y )
-{
-    TicToc t_making_desc;
-    
-    int num_pts_scan_down = _scan_down.points.size();
-
-    const int NO_POINT = -1000;
-    MatrixXd desc = NO_POINT * MatrixXd::Ones(PC_NUM_RING, PC_NUM_SECTOR);
-
-    SCPointType pt;
-    float azim_angle, azim_range; // wihtin 2d plane
-    int ring_idx, sctor_idx;
-    for (int pt_idx = 0; pt_idx < num_pts_scan_down; pt_idx++)
-    {
-        pt.x = _scan_down.points[pt_idx].x - trans_x; 
-        pt.y = _scan_down.points[pt_idx].y - trans_y;
-        pt.z = _scan_down.points[pt_idx].z + LIDAR_HEIGHT; // naive adding is ok (all points should be > 0).
-
-        if(pt.z < 0)
-        continue;
-
-        // xyz to ring, sector
-        azim_range = sqrt(pt.x * pt.x + pt.y * pt.y);
-        azim_angle = xy2theta(pt.x, pt.y);
-
-        // if range is out of roi, pass
-        if( azim_range > PC_MAX_RADIUS )
-            continue;
-
-        ring_idx = std::max( std::min( PC_NUM_RING, int(ceil( (azim_range / PC_MAX_RADIUS) * PC_NUM_RING )) ), 1 );
-        sctor_idx = std::max( std::min( PC_NUM_SECTOR, int(ceil( (azim_angle / 360.0) * PC_NUM_SECTOR )) ), 1 );
-
-        // taking maximum z 
-        if ( desc(ring_idx-1, sctor_idx-1) < pt.z ) // -1 means cpp starts from 0
-            desc(ring_idx-1, sctor_idx-1) = pt.z; // update for taking maximum value at that bin
-    }
-
-    // reset no points to zero (for cosine dist later)
-    for ( int row_idx = 0; row_idx < desc.rows(); row_idx++ )
-        for ( int col_idx = 0; col_idx < desc.cols(); col_idx++ )
-            if( desc(row_idx, col_idx) == NO_POINT )
-                desc(row_idx, col_idx) = 0;
-
-    t_making_desc.toc("PolarContext making");
-
-    return desc;
 }
 
 void coreImportTest (void)
@@ -245,6 +183,7 @@ std::pair<double, int> SCManager::distanceBtnScanContext( MatrixXd &_sc1, Matrix
 } // distanceBtnScanContext
 
 
+
 MatrixXd SCManager::makeScancontext( pcl::PointCloud<SCPointType> & _scan_down )
 {
     TicToc t_making_desc;
@@ -252,12 +191,17 @@ MatrixXd SCManager::makeScancontext( pcl::PointCloud<SCPointType> & _scan_down )
     int num_pts_scan_down = _scan_down.points.size();
 
     // main
-    const int NO_POINT = -1000;
+    const int NO_POINT = 0;
     MatrixXd desc = NO_POINT * MatrixXd::Ones(PC_NUM_RING, PC_NUM_SECTOR);
 
     SCPointType pt;
     float azim_angle, azim_range; // wihtin 2d plane
     int ring_idx, sctor_idx;
+
+ //------------------------------------------------------iris descriptor-----------------------------------------   
+    int k = 8;  
+    int pixelCount[PC_NUM_RING][PC_NUM_SECTOR][k] = {0};
+
     for (int pt_idx = 0; pt_idx < num_pts_scan_down; pt_idx++)
     {
         pt.x = _scan_down.points[pt_idx].x; 
@@ -275,24 +219,37 @@ MatrixXd SCManager::makeScancontext( pcl::PointCloud<SCPointType> & _scan_down )
         if( azim_range > PC_MAX_RADIUS )
             continue;
 
+        double max_z = azim_range*tan(angle)+LIDAR_HEIGHT, min_z = 0;
+        
+        double heightInterval = (max_z - min_z)/k;
+
         ring_idx = std::max( std::min( PC_NUM_RING, int(ceil( (azim_range / PC_MAX_RADIUS) * PC_NUM_RING )) ), 1 );
         sctor_idx = std::max( std::min( PC_NUM_SECTOR, int(ceil( (azim_angle / 360.0) * PC_NUM_SECTOR )) ), 1 );
-
-        // taking maximum z 
-        if ( desc(ring_idx-1, sctor_idx-1) < pt.z ) // -1 means cpp starts from 0
-            desc(ring_idx-1, sctor_idx-1) = pt.z; // update for taking maximum value at that bin
+        //该点处于(ring_idx,sctor_idx)的子区域中
+        
+        if(pt.z >max_z)
+        pt.z = max_z;
+        int kk = floor(pt.z/heightInterval);
+        pixelCount[ring_idx-1][sctor_idx-1][kk]=1;
     }
 
-    // reset no points to zero (for cosine dist later)
     for ( int row_idx = 0; row_idx < desc.rows(); row_idx++ )
         for ( int col_idx = 0; col_idx < desc.cols(); col_idx++ )
-            if( desc(row_idx, col_idx) == NO_POINT )
-                desc(row_idx, col_idx) = 0;
+            for(int kkk = 0; kkk < k; kkk++)
+               desc(row_idx, col_idx) += pixelCount[row_idx][col_idx][kkk]*pow(2,kkk);
+
 
     t_making_desc.toc("PolarContext making");
 
     return desc;
 } // SCManager::makeScancontext
+
+
+
+
+
+
+
 
 MatrixXd SCManager::makeRingkeyFromScancontext( Eigen::MatrixXd &_desc )
 {
@@ -515,44 +472,14 @@ std::pair<int, float> SCManager::detectRelocalID( pcl::PointCloud<SCPointType> &
      * loop threshold check
      */
 
-//--------------------------------------------transform------------------------------------------------------------
-/**    
-    cout<<"save is start"<<endl;
-    
-    std::string path = "/home/zeng/catkin_ws/data/original.pcd";
-    pcl::io::savePCDFileASCII(path, _scan_down);
-
-    for(int i = 0; i <21; ++i)
-    {
-        Eigen::MatrixXd sc_transform_x = makeTransformScancontext(_scan_down, i,0);
-        Eigen::MatrixXd sc_transform_y = makeTransformScancontext(_scan_down, 0,i);
-        Eigen::MatrixXd sc_transform_xy = makeTransformScancontext(_scan_down, i,i);
-        cv::Mat sci_transform_x = createSci(sc_transform_x);
-        cv::Mat sci_transform_y = createSci(sc_transform_y);
-        cv::Mat sci_transform_xy = createSci(sc_transform_xy);
-        char name_x[100],name_y[100],name_xy[100];
-        sprintf(name_x,"/home/zeng/catkin_ws/data/transform_x/x+%d.jpg",i);
-        sprintf(name_y,"/home/zeng/catkin_ws/data/transform_y/y+%d.jpg",i);
-        sprintf(name_xy,"/home/zeng/catkin_ws/data/transform_xy/x+%d,y+%d.jpg",i,i);
-        cv::imwrite(name_x,sci_transform_x);
-        cv::imwrite(name_y,sci_transform_y);
-        cv::imwrite(name_xy,sci_transform_xy);
-    }
-    cout<<"save is finish"<<endl;
-**/
-//-----------------------------------------transform------------------------------------------------------------
-
 // --------------------------------------------------create sc image--------------------------------------
-
+       
     cv::Mat sciForRedPoint = createSci(sc);
-    cv::Mat sciForRedPointAddAxes = addAxes(sciForRedPoint,"     red point");
-
     Eigen::MatrixXd scShift = circshift(polarcontexts_[nn_idx],nn_align);
     cv::Mat sciForWhitePoint = createSci(scShift);
-    cv::Mat sciForWhitePointAddAxes = addAxes(sciForWhitePoint,"     white point");
 
-    cv::imshow("red point",sciForRedPointAddAxes);
-    cv::imshow("white point",sciForWhitePointAddAxes);
+    cv::imshow("red point",sciForRedPoint);
+    cv::imshow("white point",sciForWhitePoint);
     cv::waitKey(1);
 
 // --------------------------------------------------create sc image--------------------------------------
@@ -572,7 +499,7 @@ std::pair<int, float> SCManager::detectRelocalID( pcl::PointCloud<SCPointType> &
     else
     {
         
-        if(min_dist < 0.7 && pointNum < 5500)
+        if(min_dist < 0.4 && pointNum < 5500)
         {
             loop_id = nn_idx;
             cout << "[Relocalize found] Nearest distance: " << min_dist << " between current pointcloud and " << nn_idx << "." << endl;

@@ -58,6 +58,7 @@ target_link_libraries(sc_featureAssociation ${catkin_LIBRARIES} ${PCL_LIBRARIES}
 add_executable(sc_mapOptmization 
     src/mapOptmization.cpp
     src/Scancontext.cpp
+    src/ImageAxesAdd.cpp
 )
 target_link_libraries(sc_mapOptmization 
     ${catkin_LIBRARIES} 

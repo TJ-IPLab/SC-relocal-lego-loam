@@ -41,6 +41,8 @@
 #include <gtsam/nonlinear/Marginals.h>
 #include <gtsam/nonlinear/Values.h>
 
+#include <unistd.h>
+
 #include <gtsam/nonlinear/ISAM2.h>
 
 #include "Scancontext.h"
@@ -133,6 +135,7 @@ private:
     ros::Publisher pubRecentKeyFrames;
     ros::Publisher pubRegisteredCloud;
     ros::Publisher pubRelocalCloud;
+    ros::Publisher pubTransformCloud;
 
     ros::Subscriber subLaserCloudRaw;
     ros::Subscriber subLaserCloudCornerLast;
@@ -292,7 +295,7 @@ private:
     float ctRoll, stRoll, ctPitch, stPitch, ctYaw, stYaw, tInX, tInY, tInZ;
 
     // // loop detector 
-    SCManager scManager;
+    SCManager scManager,forTransform;
 
 public:
 
@@ -324,6 +327,7 @@ public:
         pubRecentKeyFrames = nh.advertise<sensor_msgs::PointCloud2>("/recent_cloud", 2);
         pubRegisteredCloud = nh.advertise<sensor_msgs::PointCloud2>("/registered_cloud", 2);
         pubRelocalCloud = nh.advertise<sensor_msgs::PointCloud2>("/relocal_cloud", 2);
+        pubTransformCloud = nh.advertise<sensor_msgs::PointCloud2>("/transform", 2);
 
         float filter_size;
         downSizeFilterCorner.setLeafSize(0.2, 0.2, 0.2);
@@ -706,6 +710,7 @@ public:
 
             cloudOut->points[i] = pointTo;
         }
+
         return cloudOut;
     }
 
@@ -756,6 +761,38 @@ public:
                 cloudMsgTemp.header.stamp = ros::Time().fromSec(laserCloudRawTime);
                 cloudMsgTemp.header.frame_id = "/velodyne";
                 pubRelocalCloud.publish(cloudMsgTemp);
+
+/**
+----------------------------------------transform------------------------------------------------------
+                for (int trans = 0; trans < 21; ++trans)
+                {
+                    pcl::PointCloud<PointType>::Ptr copy(new pcl::PointCloud<PointType>());
+                    pcl::copyPointCloud(*resultpcd,  *copy);
+                for (int i = 0; i < copy->points.size(); i++)
+                {
+                    copy->points[i].y -= trans;
+                    copy->points[i].z -= 20;
+                }
+
+                sensor_msgs::PointCloud2 transformCloud;
+                pcl::toROSMsg(*copy, transformCloud);
+                transformCloud.header.stamp = ros::Time().fromSec(laserCloudRawTime);
+                transformCloud.header.frame_id = "/velodyne";
+                pubTransformCloud.publish(transformCloud);
+
+                Eigen::MatrixXd sc = forTransform.makeScancontext(*copy);
+                cv::Mat sciForRedPoint = forTransform.createSci(sc);
+                char name[100];
+                sprintf(name,"transformPoint_y+%d",trans);
+                cv::Mat sciForRedPointAddAxes = forTransform.addAxes(sciForRedPoint,name);
+                cv::imshow("transform point",sciForRedPointAddAxes);
+                cv::waitKey(1);
+                sleep(1);
+               
+                }
+----------------------------------------transform------------------------------------------------------
+**/
+
             }
             // cv.notify_one();
         }
@@ -857,16 +894,23 @@ public:
         }
 
         if (pubRegisteredCloud.getNumSubscribers() != 0){
+
+//            for (int j = 0; j <= 20;++j)
+            {
             pcl::PointCloud<PointType>::Ptr cloudOut(new pcl::PointCloud<PointType>());
             PointTypePose thisPose6D = trans2PointTypePose(transformTobeMapped);
             *cloudOut += *transformPointCloud(laserCloudCornerLastDS,  &thisPose6D);
-            *cloudOut += *transformPointCloud(laserCloudSurfTotalLast, &thisPose6D);
-            
+            *cloudOut += *transformPointCloud(laserCloudSurfTotalLast, &thisPose6D); 
+            int cloudSize = cloudOut->points.size();
+        
             sensor_msgs::PointCloud2 cloudMsgTemp;
             pcl::toROSMsg(*cloudOut, cloudMsgTemp);
             cloudMsgTemp.header.stamp = ros::Time().fromSec(timeLaserOdometry);
             cloudMsgTemp.header.frame_id = "/camera_init";
             pubRegisteredCloud.publish(cloudMsgTemp);
+
+            }
+
         } 
     }
 
@@ -986,7 +1030,7 @@ public:
         pcl::toROSMsg(*globalMapKeyFramesDS, cloudMsgTemp);
         cloudMsgTemp.header.stamp = ros::Time().fromSec(timeLaserOdometry);
         cloudMsgTemp.header.frame_id = "/camera_init";
-        pubLaserCloudSurround.publish(cloudMsgTemp);  
+        pubLaserCloudSurround.publish(cloudMsgTemp); 
 
         globalMapKeyPoses->clear();
         globalMapKeyPosesDS->clear();
@@ -1900,22 +1944,126 @@ int main(int argc, char** argv)
     nh_getparam.getParam("Threshold", Threshold);
     nh_getparam.getParam("relocalHz", Hz);
     MO.getRelocalParam(LocalizeFlag, Scene, FrameNum, Threshold, Hz);
+
+
+    ros::Publisher marker_pub = nh_getparam.advertise<visualization_msgs::Marker>("visualization_marker", 10);
+    visualization_msgs::Marker line_list1,line_list2,line_list3,line_list4,line_list5;
+    ros::Rate r(60);
+
+
   
     std::thread visualizeMapThread(&mapOptimization::visualizeGlobalMapThread, &MO);
-    if (LocalizeFlag){
+    if (LocalizeFlag)
+    {
         std::thread RelocalThread(&mapOptimization::RelocalThread, &MO);
+
+        float a=0;
+        int f=0,j=1;
 
         ros::Rate rate(200);
         while (ros::ok())
         // while ( 1 )
         {
-            ros::spinOnce();
 
-            // MO.run();
+        line_list1.header.frame_id = line_list2.header.frame_id =line_list3.header.frame_id =line_list4.header.frame_id =line_list5.header.frame_id ="/velodyne";
+        line_list1.header.stamp = line_list2.header.stamp =  line_list3.header.stamp = line_list4.header.stamp =line_list5.header.stamp =ros::Time::now();
+        line_list1.ns = line_list2.ns =line_list3.ns =line_list4.ns = line_list5.ns = "lego_loam";
+        line_list1.action = line_list2.action = line_list3.action = line_list4.action = line_list5.action =visualization_msgs::Marker::ADD;
+        line_list1.pose.orientation.w = line_list2.pose.orientation.w = line_list3.pose.orientation.w = line_list4.pose.orientation.w = line_list5.pose.orientation.w = 1.0;
+        line_list1.id = 0;
+        line_list2.id = 1;
+        line_list3.id = 2;
+        line_list4.id = 3;
+        line_list5.id = 4;
+        line_list1.type = line_list2.type = line_list3.type = line_list4.type = line_list5.type = visualization_msgs::Marker::LINE_LIST;
 
-            rate.sleep();
+        line_list1.scale.x = 0.02;
+        line_list2.scale.x = 0.02;
+        line_list3.scale.x = 0.1;
+        line_list4.scale.x = 0.1;
+        line_list5.scale.x = 0.1;
+
+        line_list1.color.g = 1.0f;
+        line_list1.color.a = 1.0;
+        line_list2.color.g = 1.0f;
+        line_list2.color.a = 1.0;
+        line_list3.color.g = 1.0f;
+        line_list3.color.a = 1.0;
+        line_list4.color.g = 1.0f;
+        line_list4.color.a = 1.0;
+        line_list5.color.b = 1.0;
+        line_list5.color.a = 1.0;
+
+        geometry_msgs::Point p1;
+        geometry_msgs::Point p2;
+        geometry_msgs::Point p3;
+
+        if(f == 0)
+        {
+        p3.x = 0;
+        p3.y = 0;
+        p3.z = 0;
+        line_list5.points.push_back(p3);
+        p3.x = 80;
+        line_list5.points.push_back(p3);
+        }    
+
+        if(f != 0 && f!=60)
+        {
+        p1.x = 0;
+        p1.y = 0;
+        p1.z = 0;
+        if(f%10 != 0)
+        line_list1.points.push_back(p1);
+        else
+        line_list3.points.push_back(p1);
+        p1.x = 80.0*cos(f*6.0/180.0*3.14159);
+        p1.y = 80.0*sin(f*6.0/180.0*3.14159);
+        if(f%10 != 0)    
+        line_list1.points.push_back(p1);
+        else
+        line_list3.points.push_back(p1);
         }
 
+        if(j!=21)
+        {
+        p2.x = j*4.0*cos(a);
+        p2.y = j*4.0*sin(a);
+        p2.z = 0;
+        if(j%5 != 0) 
+        line_list2.points.push_back(p2);
+        else
+        line_list4.points.push_back(p2);
+        p2.x = j*4.0*cos(a+0.1);
+        p2.y = j*4.0*sin(a+0.1);
+        if(j%5 != 0)
+        line_list2.points.push_back(p2);
+        else
+        line_list4.points.push_back(p2);
+        }
+
+        marker_pub.publish(line_list1);
+        marker_pub.publish(line_list2);
+        marker_pub.publish(line_list3);
+        marker_pub.publish(line_list4);
+        marker_pub.publish(line_list5);
+    
+        ros::spinOnce();               // check for incoming messages
+        // MO.run();
+        rate.sleep();
+
+        if(f<60)
+        f+=1;
+        if(a<6.3)
+        a+=0.1;
+        else
+        {
+        a=0;
+        if(j<21)
+        j+=1;
+        }
+
+        }
         visualizeMapThread.join();
         RelocalThread.join();
     }
