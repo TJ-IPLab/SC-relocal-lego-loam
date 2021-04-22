@@ -25,6 +25,13 @@
 
 #include <tf/transform_broadcaster.h>
 #include <tf/transform_datatypes.h>
+
+#include <ros/console.h>
+#include <nav_msgs/Path.h>
+#include <std_msgs/String.h>
+#include <geometry_msgs/Quaternion.h>
+#include <visualization_msgs/Marker.h>
+#include <tf/tf.h>
  
 #include <vector>
 #include <cmath>

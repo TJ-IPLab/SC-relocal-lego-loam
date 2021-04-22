@@ -27,6 +27,8 @@
 
 #include "tictoc.h"
 
+#include "ImageAxesAdd.h"
+
 using namespace Eigen;
 using namespace nanoflann;
 
@@ -63,6 +65,9 @@ public:
     Eigen::MatrixXd makeScancontext( pcl::PointCloud<SCPointType> & _scan_down );
     Eigen::MatrixXd makeRingkeyFromScancontext( Eigen::MatrixXd &_desc );
     Eigen::MatrixXd makeSectorkeyFromScancontext( Eigen::MatrixXd &_desc );
+    Eigen::MatrixXd makeTransformScancontext( pcl::PointCloud<SCPointType> & _scan_down, int trans_x, int trans_y );
+    cv::Mat createSci (Eigen::MatrixXd &scsc);
+    cv::Mat addAxes(cv::Mat &sci,std::string title);
 
     int fastAlignUsingVkey ( MatrixXd & _vkey1, MatrixXd & _vkey2 ); 
     double distDirectSC ( MatrixXd &_sc1, MatrixXd &_sc2 ); // "d" (eq 5) in the original paper (IROS 18)
@@ -76,7 +81,7 @@ public:
 
 public:
     // hyper parameters ()
-    const double LIDAR_HEIGHT = 2.0; // lidar height : add this for simply directly using lidar scan in the lidar local coord (not robot base coord) / if you use robot-coord-transformed lidar scans, just set this as 0.
+    const double LIDAR_HEIGHT = 1.7; // lidar height : add this for simply directly using lidar scan in the lidar local coord (not robot base coord) / if you use robot-coord-transformed lidar scans, just set this as 0.
 
     const int    PC_NUM_RING = 20; // 20 in the original paper (IROS 18)
     const int    PC_NUM_SECTOR = 60; // 60 in the original paper (IROS 18)
@@ -96,6 +101,7 @@ public:
     // config 
     const int    TREE_MAKING_PERIOD_ = 10; // i.e., remaking tree frequency, to avoid non-mandatory every remaking, to save time cost / in the LeGO-LOAM integration, it is synchronized with the loop detection callback (which is 1Hz) so it means the tree is updated evrey 10 sec. But you can use the smaller value because it is enough fast ~ 5-50ms wrt N.
     int          tree_making_period_conter = 0;
+    int relocal_count = 0;
 
     // data 
     std::vector<double> polarcontexts_timestamp_; // optional.
