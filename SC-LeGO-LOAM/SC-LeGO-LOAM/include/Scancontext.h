@@ -68,10 +68,13 @@ public:
     Eigen::MatrixXd makeTransformScancontext( pcl::PointCloud<SCPointType> & _scan_down, int trans_x, int trans_y );
     cv::Mat createSci (Eigen::MatrixXd &scsc);
     cv::Mat addAxes(cv::Mat &sci,std::string title);
+    Eigen::Matrix<std::vector<float>, Dynamic, Dynamic> down_resolution( Eigen::MatrixXd &_desc );
 
     int fastAlignUsingVkey ( MatrixXd & _vkey1, MatrixXd & _vkey2 ); 
     double distDirectSC ( MatrixXd &_sc1, MatrixXd &_sc2 ); // "d" (eq 5) in the original paper (IROS 18)
-    std::pair<double, int> distanceBtnScanContext ( MatrixXd &_sc1, MatrixXd &_sc2 ); // "D" (eq 6) in the original paper (IROS 18)
+    double distDirectSC(MatrixXd &_sc1, Eigen::Matrix<std::vector<float>, Dynamic, Dynamic> &_sc2_downres);
+    std::pair<double, int> distanceBtnScanContext(MatrixXd &_sc1, MatrixXd &_sc2); // "D" (eq 6) in the original paper (IROS 18)
+    std::pair<double, int> distanceBtnScanContext(MatrixXd &_sc1, MatrixXd &_sc2, Eigen::Matrix<std::vector<float>, Dynamic, Dynamic> &_sc2_down, std::pair<double, int> &result_res_1);
 
     // User-side API
     void makeAndSaveScancontextAndKeys( pcl::PointCloud<SCPointType> & _scan_down );
@@ -106,6 +109,7 @@ public:
     // data 
     std::vector<double> polarcontexts_timestamp_; // optional.
     std::vector<Eigen::MatrixXd> polarcontexts_;
+    std::vector<Eigen::Matrix<std::vector<float>, Dynamic, Dynamic>> polarcontexts_multires_1_;
     std::vector<Eigen::MatrixXd> polarcontext_invkeys_;
     std::vector<Eigen::MatrixXd> polarcontext_vkeys_;
 

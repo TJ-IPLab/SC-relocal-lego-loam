@@ -4,7 +4,7 @@
     <param name="/use_sim_time" value="false" />
     <param name="/initLocalizeFlag" value="true" />
     <param name="/Scene" value="ywxk" />
-    <param name="/initMapFrameNum" value="10" />
+    <param name="/initMapFrameNum" value="960" />
     <param name="/Threshold" value="0.4" />
     <param name="/relocalHz" value="1" />
 
