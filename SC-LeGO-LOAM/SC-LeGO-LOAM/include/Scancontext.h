@@ -106,6 +106,7 @@ public:
     // config 
     const int    TREE_MAKING_PERIOD_ = 10; // i.e., remaking tree frequency, to avoid non-mandatory every remaking, to save time cost / in the LeGO-LOAM integration, it is synchronized with the loop detection callback (which is 1Hz) so it means the tree is updated evrey 10 sec. But you can use the smaller value because it is enough fast ~ 5-50ms wrt N.
     int          tree_making_period_conter = 0;
+    int relocal_count = 0;
 
     std::string gpsFail_path = "/home/zeng/catkin_ws/data/pre_map/name.txt";
     std::string descriptorType = "sci";

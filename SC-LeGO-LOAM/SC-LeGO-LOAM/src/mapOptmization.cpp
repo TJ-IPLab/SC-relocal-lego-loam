@@ -2164,89 +2164,110 @@ int main(int argc, char** argv)
     {
         std::thread RelocalThread(&mapOptimization::RelocalThread, &MO);
 
-        float a=0;
-        int f=0,j=1;
-
+        float circle_angle = 0;
+        int sector_index = 0, ring_index = 1;
         ros::Rate rate(200);
         while (ros::ok())
         // while ( 1 )
         {
 
-        line_list1.header.frame_id = line_list2.header.frame_id =line_list3.header.frame_id =line_list4.header.frame_id =line_list5.header.frame_id ="/velodyne";
-        line_list1.header.stamp = line_list2.header.stamp =  line_list3.header.stamp = line_list4.header.stamp =line_list5.header.stamp =ros::Time::now();
-        line_list1.ns = line_list2.ns =line_list3.ns =line_list4.ns = line_list5.ns = "lego_loam";
-        line_list1.action = line_list2.action = line_list3.action = line_list4.action = line_list5.action =visualization_msgs::Marker::ADD;
-        line_list1.pose.orientation.w = line_list2.pose.orientation.w = line_list3.pose.orientation.w = line_list4.pose.orientation.w = line_list5.pose.orientation.w = 1.0;
-        line_list1.id = 0;
-        line_list2.id = 1;
-        line_list3.id = 2;
-        line_list4.id = 3;
-        line_list5.id = 4;
-        line_list1.type = line_list2.type = line_list3.type = line_list4.type = line_list5.type = visualization_msgs::Marker::LINE_LIST;
+            line_list1.header.frame_id = line_list2.header.frame_id = line_list3.header.frame_id = line_list4.header.frame_id = line_list5.header.frame_id = "/velodyne";
+            line_list1.header.stamp = line_list2.header.stamp = line_list3.header.stamp = line_list4.header.stamp = line_list5.header.stamp = ros::Time::now();
+            line_list1.ns = line_list2.ns = line_list3.ns = line_list4.ns = line_list5.ns = "lego_loam";
+            line_list1.action = line_list2.action = line_list3.action = line_list4.action = line_list5.action = visualization_msgs::Marker::ADD;
+            line_list1.pose.orientation.w = line_list2.pose.orientation.w = line_list3.pose.orientation.w = line_list4.pose.orientation.w = line_list5.pose.orientation.w = 1.0;
+            line_list1.id = 0;
+            line_list2.id = 1;
+            line_list3.id = 2;
+            line_list4.id = 3;
+            line_list5.id = 4;
+            line_list1.type = line_list2.type = line_list3.type = line_list4.type = line_list5.type = visualization_msgs::Marker::LINE_LIST;
 
-        line_list1.scale.x = 0.02;
-        line_list2.scale.x = 0.02;
-        line_list3.scale.x = 0.1;
-        line_list4.scale.x = 0.1;
-        line_list5.scale.x = 0.1;
+            line_list1.scale.x = 0.02;
+            line_list2.scale.x = 0.02;
+            line_list3.scale.x = 0.1;
+            line_list4.scale.x = 0.1;
+            line_list5.scale.x = 0.1;
 
-        line_list1.color.g = 1.0f;
-        line_list1.color.a = 1.0;
-        line_list2.color.g = 1.0f;
-        line_list2.color.a = 1.0;
-        line_list3.color.g = 1.0f;
-        line_list3.color.a = 1.0;
-        line_list4.color.g = 1.0f;
-        line_list4.color.a = 1.0;
-        line_list5.color.b = 1.0;
-        line_list5.color.a = 1.0;
+            line_list1.color.g = 1.0f;
+            line_list1.color.a = 1.0;
+            line_list2.color.g = 1.0f;
+            line_list2.color.a = 1.0;
+            line_list3.color.g = 1.0f;
+            line_list3.color.a = 1.0;
+            line_list4.color.g = 1.0f;
+            line_list4.color.a = 1.0;
+            line_list5.color.b = 1.0;
+            line_list5.color.a = 1.0;
 
-        geometry_msgs::Point p1;
-        geometry_msgs::Point p2;
-        geometry_msgs::Point p3;
+            geometry_msgs::Point p1;
+            geometry_msgs::Point p2;
+            geometry_msgs::Point p3;
 
-        if(f == 0)
-        {
-        p3.x = 0;
-        p3.y = 0;
-        p3.z = 0;
-        line_list5.points.push_back(p3);
-        p3.x = 80;
-        line_list5.points.push_back(p3);
-        }    
+            if (sector_index == 0)
+            {
+                p3.x = 0;
+                p3.y = 0;
+                p3.z = 0;
+                line_list5.points.push_back(p3);
+                p3.x = 80;
+                line_list5.points.push_back(p3);
+            }
 
-        if(f != 0 && f!=60)
-        {
-        p1.x = 0;
-        p1.y = 0;
-        p1.z = 0;
-        if(f%10 != 0)
-        line_list1.points.push_back(p1);
-        else
-        line_list3.points.push_back(p1);
-        p1.x = 80.0*cos(f*6.0/180.0*3.14159);
-        p1.y = 80.0*sin(f*6.0/180.0*3.14159);
-        if(f%10 != 0)    
-        line_list1.points.push_back(p1);
-        else
-        line_list3.points.push_back(p1);
-        }
+            if (sector_index != 0 && sector_index != 60)
+            {
+                p1.x = 0;
+                p1.y = 0;
+                p1.z = 0;
+                if (sector_index % 10 != 0)
+                    line_list1.points.push_back(p1);
+                else
+                    line_list3.points.push_back(p1);
+                p1.x = 80.0 * cos(sector_index * 6.0 / 180.0 * M_PI);
+                p1.y = 80.0 * sin(sector_index * 6.0 / 180.0 * M_PI);
+                if (sector_index % 10 != 0)
+                    line_list1.points.push_back(p1);
+                else
+                    line_list3.points.push_back(p1);
+            }
 
-        if(j!=21)
-        {
-        p2.x = j*4.0*cos(a);
-        p2.y = j*4.0*sin(a);
-        p2.z = 0;
-        if(j%5 != 0) 
-        line_list2.points.push_back(p2);
-        else
-        line_list4.points.push_back(p2);
-        p2.x = j*4.0*cos(a+0.1);
-        p2.y = j*4.0*sin(a+0.1);
-        if(j%5 != 0)
-        line_list2.points.push_back(p2);
-        else
-        line_list4.points.push_back(p2);
+            if (ring_index != 21)
+            {
+                p2.x = ring_index * 4.0 * cos(circle_angle);
+                p2.y = ring_index * 4.0 * sin(circle_angle);
+                p2.z = 0;
+                if (ring_index % 5 != 0)
+                    line_list2.points.push_back(p2);
+                else
+                    line_list4.points.push_back(p2);
+                p2.x = ring_index * 4.0 * cos(circle_angle + 6.0 / 180.0 * M_PI);
+                p2.y = ring_index * 4.0 * sin(circle_angle + 6.0 / 180.0 * M_PI);
+                if (ring_index % 5 != 0)
+                    line_list2.points.push_back(p2);
+                else
+                    line_list4.points.push_back(p2);
+            }
+
+            marker_pub.publish(line_list1);
+            marker_pub.publish(line_list2);
+            marker_pub.publish(line_list3);
+            marker_pub.publish(line_list4);
+            marker_pub.publish(line_list5);
+
+            ros::spinOnce(); // check for incoming messages
+            // MO.run();
+            rate.sleep();
+
+            if (sector_index < 60)
+                sector_index += 1;
+            if (circle_angle < 2 * M_PI)
+                circle_angle += 6.0 / 180.0 * M_PI;
+            else
+            {
+                circle_angle = 0;
+                if (ring_index < 21)
+                    ring_index += 1;
+            }
         }
 
         marker_pub.publish(line_list1);
