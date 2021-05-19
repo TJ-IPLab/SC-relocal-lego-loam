@@ -38,7 +38,7 @@
 #include <gtsam/slam/BetweenFactor.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam/nonlinear/LevenbergMarquardtOptimizer.h>
-#include <gtsam/nonlinear/Marginals.h>
+#include <gtsam/nonlinear/Marginals.h> 
 #include <gtsam/nonlinear/Values.h>
 
 #include <unistd.h>
@@ -51,6 +51,12 @@
 #include <pcl/io/pcd_io.h>
 #include <condition_variable>
 #include <unistd.h>
+
+#include "nav_msgs/Path.h"
+#include "geometry_msgs/PoseStamped.h"
+//#include "gnss_bestpose.h"
+
+int count1 = 0,count2=0,count3=0;
 vector<string> getFiles(string cate_dir)
 {
     vector<string> files; //存放文件名
@@ -93,6 +99,77 @@ vector<string> getFiles(string cate_dir)
     return files;
 }
 
+std::vector<std::pair<double,double>> utmRecord;
+std::vector<std::pair<double,double>> utmRecord_load;
+std::pair<double,double> utm_EN;
+std::pair<double,double> utm_EN_load;
+bool saveThisKeyFrame = false;
+bool waitFlag = false;
+int countGPSHz = 10;
+int counthaha = 0; 
+int counttt = 0;
+
+void LonLat2UTM(double longitude, double latitude, double& UTME, double& UTMN)
+{
+	double lat = latitude;
+	double lon = longitude;
+
+	double kD2R = PI / 180.0;
+	double ZoneNumber = floor((lon - 1.5) / 3.0) + 1;
+	double L0 = ZoneNumber * 3.0;
+
+	double a = 6378137.0;
+	double F = 298.257223563;
+	double f = 1 / F;
+	double b = a * (1 - f);
+	double ee = (a * a - b * b) / (a * a);
+	double e2 = (a * a - b * b) / (b * b);
+	double n = (a - b) / (a + b); 
+	double n2 = (n * n); 
+	double n3 = (n2 * n); 
+	double n4 = (n2 * n2); 
+	double n5 = (n4 * n);
+	double al = (a + b) * (1 + n2 / 4 + n4 / 64) / 2.0;
+	double bt = -3 * n / 2 + 9 * n3 / 16 - 3 * n5 / 32.0;
+	double gm = 15 * n2 / 16 - 15 * n4 / 32;
+	double dt = -35 * n3 / 48 + 105 * n5 / 256;
+	double ep = 315 * n4 / 512;
+	double B = lat * kD2R;
+	double L = lon * kD2R;
+	L0 = L0 * kD2R;
+	double l = L - L0; 
+	double cl = (cos(B) * l); 
+	double cl2 = (cl * cl); 
+	double cl3 = (cl2 * cl); 
+	double cl4 = (cl2 * cl2); 
+	double cl5 = (cl4 * cl); 
+	double cl6 = (cl5 * cl); 
+	double cl7 = (cl6 * cl); 
+	double cl8 = (cl4 * cl4);
+	double lB = al * (B + bt * sin(2 * B) + gm * sin(4 * B) + dt * sin(6 * B) + ep * sin(8 * B));
+	double t = tan(B); 
+	double t2 = (t * t); 
+	double t4 = (t2 * t2); 
+	double t6 = (t4 * t2);
+	double Nn = a / sqrt(1 - ee * sin(B) * sin(B));
+	double yt = e2 * cos(B) * cos(B);
+	double N = lB;
+	N = N + t * Nn * cl2 / 2;
+	N = N + t * Nn * cl4 * (5 - t2 + 9 * yt + 4 * yt * yt) / 24;
+	N = N + t * Nn * cl6 * (61 - 58 * t2 + t4 + 270 * yt - 330 * t2 * yt) / 720;
+	N = N + t * Nn * cl8 * (1385 - 3111 * t2 + 543 * t4 - t6) / 40320;
+	double E = Nn * cl;
+	E = E + Nn * cl3 * (1 - t2 + yt) / 6;
+	E = E + Nn * cl5 * (5 - 18 * t2 + t4 + 14 * yt - 58 * t2 * yt) / 120;
+	E = E + Nn * cl7 * (61 - 479 * t2 + 179 * t4 - t6) / 5040;
+	E = E + 500000;
+	N = 0.9996 * N;
+	E = 0.9996 * (E - 500000.0) + 500000.0;
+
+	UTME = E;
+	UTMN = N;
+}
+
 using namespace gtsam;
 
 class mapOptimization{
@@ -112,6 +189,8 @@ private:
     std::string SceneFolder;
     int relocalHz;
     int relocalNum;
+    std::string gpstxt_path;
+    double distThreshold;
 
     NonlinearFactorGraph gtSAMgraph;
     Values initialEstimate;
@@ -143,6 +222,7 @@ private:
     ros::Subscriber subOutlierCloudLast;
     ros::Subscriber subLaserOdometry;
     ros::Subscriber subImu;
+    ros::Subscriber subGPS;
 
     nav_msgs::Odometry odomAftMapped;
     tf::StampedTransform aftMappedTrans;
@@ -250,7 +330,6 @@ private:
     float transformBefMapped[6];
     float transformAftMapped[6];
 
-
     int imuPointerFront;
     int imuPointerLast;
 
@@ -321,6 +400,7 @@ public:
         subOutlierCloudLast = nh.subscribe<sensor_msgs::PointCloud2>("/outlier_cloud_last", 2, &mapOptimization::laserCloudOutlierLastHandler, this);
         subLaserOdometry = nh.subscribe<nav_msgs::Odometry>("/laser_odom_to_init", 5, &mapOptimization::laserOdometryHandler, this);
         subImu = nh.subscribe<sensor_msgs::Imu> (imuTopic, 50, &mapOptimization::imuHandler, this);
+        subGPS= nh.subscribe("/fusion", 1000, &mapOptimization::GPSCallback,this);
 
         pubHistoryKeyFrames = nh.advertise<sensor_msgs::PointCloud2>("/history_cloud", 2);
         pubIcpKeyFrames = nh.advertise<sensor_msgs::PointCloud2>("/corrected_cloud", 2);
@@ -350,21 +430,114 @@ public:
         allocateMemory();
     }
 
-    void getRelocalParam(bool LocalizeFlag, string Scene, int FrameNum, double Threshold, int Hz){
+
+/*
+    不用GPS间隔建图时生成GPS信息
+    void GPSCallback(const geometry_msgs::PoseStamped& gps_msg)
+    {
+        if(saveThisKeyFrame && !waitFlag)
+        {
+            double latitude = gps_msg.pose.position.x;
+            double longitude = gps_msg.pose.position.y;
+            LonLat2UTM(longitude,latitude,utm_EN.first,utm_EN.second); 
+            std::ofstream gpsOut;
+            gpsOut.open(gpstxt_path, std::ios::app);
+            gpsOut<<setprecision(15)<<utm_EN.first<<" "<<utm_EN.second<<endl;
+            waitFlag = true;
+        }
+    }
+*/    
+ 
+    void GPSCallback(const geometry_msgs::PoseStamped& gps_msg)
+    {
+        if(!initLocalizeFlag)
+        {  
+            if(waitFlag)
+                return;
+
+            if (countGPSHz % 10 == 0)
+            {
+                double latitude = gps_msg.pose.position.x;
+                double longitude = gps_msg.pose.position.y;
+                LonLat2UTM(longitude,latitude,utm_EN.first,utm_EN.second);        
+                saveThisKeyFrame = true;
+                if (!utmRecord.empty())
+                {
+                    auto it = utmRecord.end()-1;
+                    if (sqrt((utm_EN.first - it->first)*(utm_EN.first - it->first)+(utm_EN.second - it->second)*(utm_EN.second - it->second)) <= distThreshold )
+                    {
+                        saveThisKeyFrame = false;
+                    }
+                }
+                /*
+                for (auto it = utmRecord.cbegin(); it != utmRecord.cend(); ++it)
+                {
+                    if (sqrt((utm_EN.first - it->first)*(utm_EN.first - it->first)+(utm_EN.second - it->second)*(utm_EN.second - it->second)) <= distThreshold )
+                    {
+                        saveThisKeyFrame = false;
+                        break;
+                    }
+                }
+                */
+                else
+                {
+                    utmRecord.push_back(utm_EN);       
+                    std::ofstream gpsOut;
+                    gpsOut.open(gpstxt_path, std::ios::app);
+                    gpsOut<<setprecision(15)<<utm_EN.first<<" "<<utm_EN.second<<endl;
+                    gpsOut.close();
+                    saveThisKeyFrame = false;
+                }
+
+                if(saveThisKeyFrame)
+                {
+                    utmRecord.push_back(utm_EN);
+                    std::ofstream gpsOut;
+                    gpsOut.open(gpstxt_path, std::ios::app);
+                    gpsOut<<setprecision(15)<<utm_EN.first<<" "<<utm_EN.second<<endl;
+                    waitFlag = true;
+                    gpsOut.close();
+                }
+                countGPSHz = 10;
+            }
+        }
+
+        else
+        {
+            if(countGPSHz % 10 == 0)
+            {
+                double latitude = gps_msg.pose.position.x;
+                double longitude = gps_msg.pose.position.y;
+                LonLat2UTM(longitude,latitude,utm_EN.first,utm_EN.second);
+                countGPSHz = 10;
+            }
+        }
+
+        ++countGPSHz;
+    }
+
+    void getRelocalParam(bool LocalizeFlag, string Scene, int FrameNum, double Threshold, int Hz, std::string gpsPath, std::string gpsFailPath, double gpsDistThreshold, std::string descriptor){
         initLocalizeFlag = LocalizeFlag;
         initScene = Scene;
         initMapFrameNum = FrameNum;
         SceneFolder = getenv("HOME");
         SceneFolder += "/catkin_ws/data/pre_map/" + initScene + "/";
         scManager.setThres(Threshold);
+        scManager.setgpsFailPath(gpsFailPath);
+        scManager.setDescriptor(descriptor);
         relocalHz = Hz;
-
+        gpstxt_path = gpsPath;
+        distThreshold = gpsDistThreshold;
         std::cout << "initLocalizeFlag: " << initLocalizeFlag << std::endl;
         std::cout << "initScene: " << initScene << std::endl;
         std::cout << "initMapFrameNum: " << initMapFrameNum << std::endl;
         std::cout << "SceneFolder: " << SceneFolder << std::endl;
         std::cout << "Threshold: " << Threshold << std::endl;
         std::cout << "relocalHz: " << relocalHz << std::endl;
+        std::cout << "distThreshold: " << distThreshold << std::endl;
+        std::cout << "gpstxt_path: " << gpstxt_path << std::endl;
+        std::cout << "gpsFailPath: " << gpsFailPath << std::endl;
+        std::cout << "descriptor: " << descriptor << std::endl;
     }
 
     void allocateMemory(){
@@ -743,6 +916,14 @@ public:
             std::cout << "------ localizeResult.Index: " << localizeResultIndex;
             std::cout << "------ localizeResult.YawDiff: " << YawDiff << std::endl;
             unilock.unlock();
+
+            ++counttt;
+
+            std::string failpc_path = "/home/zeng/catkin_ws/data/pre_map/localizeFrame/";
+            failpc_path += to_string(laserCloudRawTime) + "_";
+            failpc_path += to_string(counttt) + "th_keyframe.pcd";
+            pcl::io::savePCDFileASCII(failpc_path, *thisRawCloudKeyFrame);
+
             if (localizeResultIndex != -1){
                 std::string resultpath = SceneFolder + files[localizeResultIndex];
                 pcl::PointCloud<PointType>::Ptr resultpcd(new pcl::PointCloud<PointType>());
@@ -932,6 +1113,27 @@ public:
             files = getFiles(SceneFolder);
             std::string pcdpath;
             std::cout << "loading... please wait" << pcdpath << std::endl;
+
+            FILE *gpsIn;
+            double utm_e,utm_n;
+            gpsIn = fopen(gpstxt_path.c_str(),"r");
+            int i = 0;
+            while(i < 7000)
+            {
+                fscanf(gpsIn, "%lf %lf\n", &utm_e, &utm_n);
+                utm_EN_load.first = utm_e;
+                utm_EN_load.second = utm_n;
+                utmRecord_load.push_back(utm_EN_load);
+
+                if (utm_e == 0 && utm_n == 0)
+                {
+                    ++i;
+                    continue;
+                }
+
+                ++i;
+
+            }
 
             for (int i = 0; i < initMapFrameNum;i++){
                 pcdpath = SceneFolder + files[i];
@@ -1740,16 +1942,22 @@ public:
         currentRobotPosPoint.y = transformAftMapped[4];
         currentRobotPosPoint.z = transformAftMapped[5];
 
-        bool saveThisKeyFrame = true;
+/*
+        saveThisKeyFrame = true;       
         if (sqrt((previousRobotPosPoint.x-currentRobotPosPoint.x)*(previousRobotPosPoint.x-currentRobotPosPoint.x)
                 +(previousRobotPosPoint.y-currentRobotPosPoint.y)*(previousRobotPosPoint.y-currentRobotPosPoint.y)
                 +(previousRobotPosPoint.z-currentRobotPosPoint.z)*(previousRobotPosPoint.z-currentRobotPosPoint.z)) < 0.3){ // save keyframe every 0.3 meter 
             saveThisKeyFrame = false;
         }
+*/
+
         if (saveThisKeyFrame == false && !cloudKeyPoses3D->points.empty())
         	return;
 
         previousRobotPosPoint = currentRobotPosPoint;
+
+        waitFlag = false;
+
         /**
          * update grsam graph
          */
@@ -1830,11 +2038,7 @@ public:
         pcl::copyPointCloud(*laserCloudSurfLastDS,    *thisSurfKeyFrame);
         pcl::copyPointCloud(*laserCloudOutlierLastDS, *thisOutlierKeyFrame);
 
-        /* 
-            Scan Context loop detector 
-            - ver 1: using surface feature as an input point cloud for scan context (2020.04.01: checked it works.)
-            - ver 2: using downsampled original point cloud (/full_cloud_projected + downsampling)
-            */
+
         bool usingRawCloud = true;
         if( usingRawCloud ) { // v2 uses downsampled raw point cloud, more fruitful height information than using feature points (v1)
             pcl::PointCloud<PointType>::Ptr thisRawCloudKeyFrame(new pcl::PointCloud<PointType>());
@@ -1847,13 +2051,13 @@ public:
         }
         else { // v1 uses thisSurfKeyFrame, it also works. (empirically checked at Mulran dataset sequences)
             scManager.makeAndSaveScancontextAndKeys(*thisSurfKeyFrame); 
-        }
-        
+        }    
+
+
         cornerCloudKeyFrames.push_back(thisCornerKeyFrame);
         surfCloudKeyFrames.push_back(thisSurfKeyFrame);
         outlierCloudKeyFrames.push_back(thisOutlierKeyFrame);
     } // saveKeyFramesAndFactor
-
 
     void correctPoses(){
     	if (aLoopIsClosed == true){
@@ -1938,20 +2142,23 @@ int main(int argc, char** argv)
     int FrameNum;
     double Threshold;
     int Hz;
+    std::string getgpsPath;
+    std::string getgpsFailPath;
+    double getgpsDistThreshold;
+    std::string getDescriptor;
     nh_getparam.getParam("initLocalizeFlag", LocalizeFlag);
     nh_getparam.getParam("Scene", Scene);
     nh_getparam.getParam("initMapFrameNum", FrameNum);
     nh_getparam.getParam("Threshold", Threshold);
     nh_getparam.getParam("relocalHz", Hz);
-    MO.getRelocalParam(LocalizeFlag, Scene, FrameNum, Threshold, Hz);
-
+    nh_getparam.getParam("gpsPath", getgpsPath);
+    nh_getparam.getParam("gpsFailPath", getgpsFailPath);
+    nh_getparam.getParam("gpsDistThreshold", getgpsDistThreshold);
+    nh_getparam.getParam("descriptor", getDescriptor);
+    MO.getRelocalParam(LocalizeFlag, Scene, FrameNum, Threshold, Hz, getgpsPath, getgpsFailPath, getgpsDistThreshold, getDescriptor);
 
     ros::Publisher marker_pub = nh_getparam.advertise<visualization_msgs::Marker>("visualization_marker", 10);
-    visualization_msgs::Marker line_list1,line_list2,line_list3,line_list4,line_list5;
-    ros::Rate r(60);
-
-
-  
+    visualization_msgs::Marker line_list1,line_list2,line_list3,line_list4,line_list5; 
     std::thread visualizeMapThread(&mapOptimization::visualizeGlobalMapThread, &MO);
     if (LocalizeFlag)
     {
@@ -2075,9 +2282,7 @@ int main(int argc, char** argv)
         // while ( 1 )
         {
             ros::spinOnce();
-
             MO.run();
-
             rate.sleep();
         }
 

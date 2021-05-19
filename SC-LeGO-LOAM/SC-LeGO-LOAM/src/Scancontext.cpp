@@ -2,31 +2,26 @@
 #include "opencv2/opencv.hpp"
 #include "iostream"
 
-
-int count = 0;
+int currentFrameID = 0;
+int mismatchNumber = 0;
+int failNumber = 0;
 const int scale = 10;
-const float maxz = 23.7;
+const  double mismatchThershold = 8.0;
+int failFlag = 1;
+int misFlag = 2;
 
 cv::Mat SCManager::createSci (Eigen::MatrixXd &scsc)
 {
+    if(descriptorType == "sci")
+    {
+    // 使用绝对高度可视化描述子
+    const float maxz_sci = 23.7;
     int a = scsc.rows()*scale, b = scsc.cols()*scale;
     cv::Mat sc = cv::Mat(a,b,CV_8UC1);  
-
-//relative height to determine the pixel
-/**
-    double maxz=0;
-    for(int i = 0; i < scsc.rows(); i++)
-    for(int j = 0; j < scsc.cols(); j++)
-    {
-        if(scsc(i,j)>maxz)
-        maxz=scsc(i,j);
-    }
-**/
-
     for (int i = 0; i < scsc.rows(); i++)
     for (int j = 0; j < scsc.cols(); j++)
     {
-        uchar pixel=floor(255*scsc(i,j)/maxz);
+        uchar pixel=floor(255*scsc(i,j)/maxz_sci);
         for (int u = i*scale;u < (i+1)*scale;u++)
         for (int v = j*scale;v < (j+1)*scale;v++)
         {
@@ -36,6 +31,86 @@ cv::Mat SCManager::createSci (Eigen::MatrixXd &scsc)
     cv::Mat sci;
     cv::applyColorMap(sc,sci,cv::COLORMAP_JET);
     return sci;
+    }
+
+    else if(descriptorType == "intensity")
+    {
+    // 因为雷达探测的最大强度未知,使用相对强度生成描述子,描述子的255像素对应每一帧的最大强度
+    int a = scsc.rows()*scale, b = scsc.cols()*scale;
+    cv::Mat sc = cv::Mat(a,b,CV_8UC1);  
+    double maxIntensity=0;
+    for(int i = 0; i < scsc.rows(); i++)
+    for(int j = 0; j < scsc.cols(); j++)
+    {
+        if(scsc(i,j) > maxIntensity)
+        maxIntensity = scsc(i,j);
+    }
+    for (int i = 0; i < scsc.rows(); i++)
+    for (int j = 0; j < scsc.cols(); j++)
+    {
+        uchar pixel=floor(255*scsc(i,j) / maxIntensity);
+        for (int u = i*scale;u < (i+1)*scale;u++)
+        for (int v = j*scale;v < (j+1)*scale;v++)
+        {
+            sc.at<uchar>(u,v) = pixel;
+        }
+    }
+    cv::Mat sci;
+    cv::applyColorMap(sc,sci,cv::COLORMAP_JET);
+    return sci;
+    }
+
+    else if(descriptorType == "iris")
+    {
+    // iris的描述子的像素直接等于矩阵的值,注意修改20*60的矩阵为20*90
+    int a = scsc.rows()*scale, b = scsc.cols()*scale;
+    cv::Mat sc = cv::Mat(a,b,CV_8UC1);  
+    for (int i = 0; i < scsc.rows(); i++)
+    for (int j = 0; j < scsc.cols(); j++)
+    {
+        uchar pixel=scsc(i,j);
+        for (int u = i*scale;u < (i+1)*scale;u++)
+        for (int v = j*scale;v < (j+1)*scale;v++)
+        {
+            sc.at<uchar>(u,v) = pixel;
+        }
+    }
+    cv::Mat sci;
+    cv::applyColorMap(sc,sci,cv::COLORMAP_JET);
+    return sci;
+    }
+
+    else if(descriptorType == "mean" || descriptorType == "variance")
+    {
+    //使用相对均值/方差可视化描述子,因为均值的最大值无法确定
+    int a = scsc.rows()*scale, b = scsc.cols()*scale;
+    cv::Mat sc = cv::Mat(a,b,CV_8UC1);  
+    double maxx=0;
+    for(int i = 0; i < scsc.rows(); i++)
+    for(int j = 0; j < scsc.cols(); j++)
+    {
+        if(scsc(i,j)>maxx)
+        maxx=scsc(i,j);
+    }
+    for (int i = 0; i < scsc.rows(); i++)
+    for (int j = 0; j < scsc.cols(); j++)
+    {
+        uchar pixel=floor(255*scsc(i,j)/maxx);
+        for (int u = i*scale;u < (i+1)*scale;u++)
+        for (int v = j*scale;v < (j+1)*scale;v++)
+        {
+            sc.at<uchar>(u,v) = pixel;
+        }
+    }
+    cv::Mat sci;
+    cv::applyColorMap(sc,sci,cv::COLORMAP_JET);
+    return sci;
+    }
+
+    else
+    {
+        throw std::invalid_argument("check the value of descriptor, it should be sci, intensity, iris, mean or variance");
+    }
 }
 
 cv::Mat SCManager::addAxes(cv::Mat &sci,std::string title)
@@ -98,6 +173,16 @@ MatrixXd SCManager::makeTransformScancontext( pcl::PointCloud<SCPointType> & _sc
     t_making_desc.toc("PolarContext making");
 
     return desc;
+}
+
+void SCManager::setgpsFailPath (std::string gpsFailPath)
+{
+    gpsFail_path = gpsFailPath;
+}
+
+void SCManager::setDescriptor (std::string descriptor)
+{
+    descriptorType = descriptor;
 }
 
 void coreImportTest (void)
@@ -246,7 +331,9 @@ std::pair<double, int> SCManager::distanceBtnScanContext( MatrixXd &_sc1, Matrix
 
 
 MatrixXd SCManager::makeScancontext( pcl::PointCloud<SCPointType> & _scan_down )
-{
+{   
+    if(descriptorType == "sci")
+    {
     TicToc t_making_desc;
 
     int num_pts_scan_down = _scan_down.points.size();
@@ -265,7 +352,9 @@ MatrixXd SCManager::makeScancontext( pcl::PointCloud<SCPointType> & _scan_down )
         pt.z = _scan_down.points[pt_idx].z + LIDAR_HEIGHT; // naive adding is ok (all points should be > 0).
 
         if(pt.z < 0)
-        continue;
+        {
+            continue;
+        }
 
         // xyz to ring, sector
         azim_range = sqrt(pt.x * pt.x + pt.y * pt.y);
@@ -292,6 +381,225 @@ MatrixXd SCManager::makeScancontext( pcl::PointCloud<SCPointType> & _scan_down )
     t_making_desc.toc("PolarContext making");
 
     return desc;
+    }
+
+    else if(descriptorType == "intensity")
+    {
+    TicToc t_making_desc;
+
+    int num_pts_scan_down = _scan_down.points.size();
+
+    // main
+    const int NO_POINT = -1000;
+    MatrixXd desc = NO_POINT * MatrixXd::Ones(PC_NUM_RING, PC_NUM_SECTOR);
+
+    SCPointType pt;
+    float azim_angle, azim_range; // wihtin 2d plane
+    int ring_idx, sctor_idx;
+    for (int pt_idx = 0; pt_idx < num_pts_scan_down; pt_idx++)
+    {
+        pt.x = _scan_down.points[pt_idx].x; 
+        pt.y = _scan_down.points[pt_idx].y;
+        pt.z = _scan_down.points[pt_idx].z + LIDAR_HEIGHT; // naive adding is ok (all points should be > 0).
+        pt.intensity = _scan_down.points[pt_idx].intensity;
+
+        if(pt.intensity < 0)
+        {
+            continue;
+        }
+
+        // xyz to ring, sector
+        azim_range = sqrt(pt.x * pt.x + pt.y * pt.y);
+        azim_angle = xy2theta(pt.x, pt.y);
+
+        // if range is out of roi, pass
+        if( azim_range > PC_MAX_RADIUS )
+            continue;
+
+        ring_idx = std::max( std::min( PC_NUM_RING, int(ceil( (azim_range / PC_MAX_RADIUS) * PC_NUM_RING )) ), 1 );
+        sctor_idx = std::max( std::min( PC_NUM_SECTOR, int(ceil( (azim_angle / 360.0) * PC_NUM_SECTOR )) ), 1 );
+
+        // taking maximum z 
+        if ( desc(ring_idx-1, sctor_idx-1) < pt.intensity ) // -1 means cpp starts from 0
+            desc(ring_idx-1, sctor_idx-1) = pt.intensity; // update for taking maximum value at that bin
+    }
+
+    // reset no points to zero (for cosine dist later)
+    for ( int row_idx = 0; row_idx < desc.rows(); row_idx++ )
+        for ( int col_idx = 0; col_idx < desc.cols(); col_idx++ )
+            if( desc(row_idx, col_idx) == NO_POINT )
+                desc(row_idx, col_idx) = 0;
+
+    t_making_desc.toc("PolarContext making");
+
+    return desc;
+    }
+
+    else if(descriptorType == "mean")
+    {
+    TicToc t_making_desc;
+
+    int num_pts_scan_down = _scan_down.points.size();
+
+    // main
+    const int NO_POINT = 0;
+    MatrixXd desc = NO_POINT * MatrixXd::Ones(PC_NUM_RING, PC_NUM_SECTOR);
+
+    SCPointType pt;
+    float azim_angle, azim_range; // wihtin 2d plane
+    int ring_idx, sctor_idx;
+    std::vector<double> save_z[PC_NUM_RING][PC_NUM_SECTOR];
+
+    for (int pt_idx = 0; pt_idx < num_pts_scan_down; pt_idx++)
+    {
+        pt.x = _scan_down.points[pt_idx].x; 
+        pt.y = _scan_down.points[pt_idx].y;
+        pt.z = _scan_down.points[pt_idx].z + LIDAR_HEIGHT; // naive adding is ok (all points should be > 0).
+
+        if(pt.z < 0)
+        {
+            continue;
+        }
+
+        // xyz to ring, sector
+        azim_range = sqrt(pt.x * pt.x + pt.y * pt.y);
+        azim_angle = xy2theta(pt.x, pt.y);
+
+        // if range is out of roi, pass
+        if( azim_range > PC_MAX_RADIUS )
+            continue;
+        ring_idx = std::max( std::min( PC_NUM_RING, int(ceil( (azim_range / PC_MAX_RADIUS) * PC_NUM_RING )) ), 1 );
+        sctor_idx = std::max( std::min( PC_NUM_SECTOR, int(ceil( (azim_angle / 360.0) * PC_NUM_SECTOR )) ), 1 );
+
+        save_z[ring_idx-1][sctor_idx-1].push_back(pt.z);
+    }
+
+    for (int i = 0; i != desc.rows(); ++i)
+        for(int j = 0; j != desc.cols(); ++j)
+        {
+            if(save_z[i][j].empty())
+            continue;
+            double mean = std::accumulate(save_z[i][j].begin(),save_z[i][j].end(),0.0)/save_z[i][j].size();
+            desc(i,j) = mean;
+        }
+
+    t_making_desc.toc("PolarContext making");
+
+    return desc;
+    }
+
+    else if(descriptorType == "iris")
+    {
+    TicToc t_making_desc;
+
+    int num_pts_scan_down = _scan_down.points.size();
+
+    const int NO_POINT = 0;
+    MatrixXd desc = NO_POINT * MatrixXd::Ones(PC_NUM_RING, PC_NUM_SECTOR);
+
+    SCPointType pt;
+    float azim_angle, azim_range; 
+    int ring_idx, sctor_idx;
+    int k = 8;  
+    int pixelCount[PC_NUM_RING][PC_NUM_SECTOR][k] = {0};
+    double max_z = 23.7, min_z = 0;
+
+    for (int pt_idx = 0; pt_idx < num_pts_scan_down; pt_idx++)
+    {
+        pt.x = _scan_down.points[pt_idx].x; 
+        pt.y = _scan_down.points[pt_idx].y;
+        pt.z = _scan_down.points[pt_idx].z + LIDAR_HEIGHT; 
+
+        if(pt.z < 0)
+        continue;
+
+        if(pt.z >max_z)
+        pt.z = max_z;
+
+        azim_range = sqrt(pt.x * pt.x + pt.y * pt.y);
+        azim_angle = xy2theta(pt.x, pt.y);
+
+        if( azim_range > PC_MAX_RADIUS )
+            continue;
+
+        ring_idx = std::max( std::min( PC_NUM_RING, int(ceil( (azim_range / PC_MAX_RADIUS) * PC_NUM_RING )) ), 1 );
+        sctor_idx = std::max( std::min( PC_NUM_SECTOR, int(ceil( (azim_angle / 360.0) * PC_NUM_SECTOR )) ), 1 );      
+
+        double heightInterval = (max_z - min_z)/k;
+        int kk = floor(pt.z/heightInterval);
+        pixelCount[ring_idx-1][sctor_idx-1][kk]=1;
+    }
+
+    for ( int row_idx = 0; row_idx < desc.rows(); row_idx++ )
+        for ( int col_idx = 0; col_idx < desc.cols(); col_idx++ )
+            for(int kkk = 0; kkk < k; kkk++)
+               desc(row_idx, col_idx) += pixelCount[row_idx][col_idx][kkk]*pow(2,kkk);
+
+
+    t_making_desc.toc("PolarContext making");
+
+    return desc;
+    }
+
+    else if(descriptorType == "variance")
+    {
+    TicToc t_making_desc;
+
+    int num_pts_scan_down = _scan_down.points.size();
+
+    const int NO_POINT = 0;
+    MatrixXd desc = NO_POINT * MatrixXd::Ones(PC_NUM_RING, PC_NUM_SECTOR);
+
+    SCPointType pt;
+    float azim_angle, azim_range; 
+    int ring_idx, sctor_idx;
+    std::vector<double> save_z[PC_NUM_RING][PC_NUM_SECTOR];
+    double accum = 0;
+
+    for (int pt_idx = 0; pt_idx < num_pts_scan_down; pt_idx++)
+    {
+        pt.x = _scan_down.points[pt_idx].x; 
+        pt.y = _scan_down.points[pt_idx].y;
+        pt.z = _scan_down.points[pt_idx].z + LIDAR_HEIGHT; 
+
+        if(pt.z < 0)
+        {
+            continue;
+        }
+
+        azim_range = sqrt(pt.x * pt.x + pt.y * pt.y);
+        azim_angle = xy2theta(pt.x, pt.y);
+
+        if( azim_range > PC_MAX_RADIUS )
+            continue;
+
+        ring_idx = std::max( std::min( PC_NUM_RING, int(ceil( (azim_range / PC_MAX_RADIUS) * PC_NUM_RING )) ), 1 );
+        sctor_idx = std::max( std::min( PC_NUM_SECTOR, int(ceil( (azim_angle / 360.0) * PC_NUM_SECTOR )) ), 1 );
+
+        save_z[ring_idx-1][sctor_idx-1].push_back(pt.z);
+    }
+
+    for (int i = 0; i != desc.rows(); ++i)
+        for(int j = 0; j != desc.cols(); ++j)
+        {
+            if(save_z[i][j].empty())
+            continue;
+            double mean = std::accumulate(save_z[i][j].begin(),save_z[i][j].end(),0.0)/save_z[i][j].size();
+            std::for_each(save_z[i][j].begin(), save_z[i][j].end(), [&](double zz){
+                accum += (mean - zz) * (mean - zz);
+            });
+            desc(i,j) = accum/save_z[i][j].size(); 
+        }
+
+    t_making_desc.toc("PolarContext making");
+
+    return desc;
+    }
+
+    else
+    {
+        throw std::invalid_argument("check the value of descriptor, it should be sci, intensity, iris, mean or variance");
+    }
 } // SCManager::makeScancontext
 
 MatrixXd SCManager::makeRingkeyFromScancontext( Eigen::MatrixXd &_desc )
@@ -391,7 +699,7 @@ std::pair<int, float> SCManager::detectLoopClosureID ( void )
     /* 
      *  step 2: pairwise distance (find optimal columnwise best-fit using cosine distance)
      */
-    TicToc t_calc_dist;   
+    TicToc t_calc_dist;
     for ( int candidate_iter_idx = 0; candidate_iter_idx < NUM_CANDIDATES_FROM_TREE; candidate_iter_idx++ )
     {
         MatrixXd polarcontext_candidate = polarcontexts_[ candidate_indexes[candidate_iter_idx] ];
@@ -492,8 +800,10 @@ std::pair<int, float> SCManager::detectRelocalID( pcl::PointCloud<SCPointType> &
      *  step 2: pairwise distance (find optimal columnwise best-fit using cosine distance)
      */
     TicToc t_calc_dist;   
+    cout<<"---candidateFrame---"<<endl;
     for ( int candidate_iter_idx = 0; candidate_iter_idx < NUM_CANDIDATES_FROM_TREE; candidate_iter_idx++ )
     {
+        cout<<candidate_indexes[candidate_iter_idx]<<endl;
         MatrixXd polarcontext_candidate = polarcontexts_[ candidate_indexes[candidate_iter_idx] ];
         std::pair<double, int> sc_dist_result = distanceBtnScanContext( curr_desc, polarcontext_candidate ); 
         
@@ -508,7 +818,9 @@ std::pair<int, float> SCManager::detectRelocalID( pcl::PointCloud<SCPointType> &
             nn_idx = candidate_indexes[candidate_iter_idx];
         }
     }
+    cout<<"---candidateFrame---"<<endl;
     t_calc_dist.toc("Distance calc");
+
     // std::cout << "start detectRelocalID ... pairwise distance calculate finished" << std::endl;
 
     /* 
@@ -566,8 +878,36 @@ std::pair<int, float> SCManager::detectRelocalID( pcl::PointCloud<SCPointType> &
         // std::cout.precision(3); 
         cout << "[Relocalize found] Nearest distance: " << min_dist << " between current pointcloud and " << nn_idx << "." << endl;
         cout << "[Relocalize found] yaw diff: " << nn_align * PC_UNIT_SECTORANGLE << " deg." << endl;
-        cout << "-------------------------------------------------" << count << "----------------------------------"<<endl;
-        count++;
+        if(nn_idx <= utmRecord_load.size())
+        {
+            auto it = utmRecord_load.begin()+nn_idx;
+            if (sqrt((utm_EN.first - it->first)*(utm_EN.first - it->first)+(utm_EN.second - it->second)*(utm_EN.second - it->second)) >= 15 )
+            {
+                double mindist = 100;
+                int minIndex = 1;
+                for(auto it2 = utmRecord_load.begin(); it2 != utmRecord_load.end(); ++it2)
+                {
+                    double dist = (utm_EN.first - it2->first)*(utm_EN.first - it2->first)+(utm_EN.second - it2->second)*(utm_EN.second - it2->second);
+                    if (dist < mindist)
+                    {
+                        mindist = dist;
+                        minIndex = (it2 - utmRecord_load.begin()) + 1;
+                    }
+                }   
+                ++mismatchNumber;
+                cout<<"this frame is mismatch! ! ! ! !"<<endl;
+                std::ofstream gpsFail;
+                gpsFail.open(gpsFail_path, std::ios::app);
+                int FailFrameID = currentFrameID + 1;
+                gpsFail<<std::setprecision(15)<<utm_EN.first<<" "<<utm_EN.second<<" "<<FailFrameID<<" "<<misFlag<<" "<<minIndex<<endl;
+                gpsFail.close();
+            }
+        }
+        else
+        {
+            cout<< "Can not judge whether it is mismatched because there is no corresponding GPS information" <<endl;
+        }
+        cout << "------" << "currentFrameID: " << ++currentFrameID << "     failNumber: " << failNumber << "     mismatchNumber: "<< mismatchNumber << "------"<<endl;
     }
     else
     {
@@ -577,16 +917,55 @@ std::pair<int, float> SCManager::detectRelocalID( pcl::PointCloud<SCPointType> &
             loop_id = nn_idx;
             cout << "[Relocalize found] Nearest distance: " << min_dist << " between current pointcloud and " << nn_idx << "." << endl;
             cout << "[Relocalize found] yaw diff: " << nn_align * PC_UNIT_SECTORANGLE << " deg." << endl;
-            cout << "-------------------------------------------------" << count << "----------------------------------"<<endl;
-            count++;
+            if(nn_idx <= utmRecord_load.size())
+            {
+                auto it = utmRecord_load.begin()+nn_idx;
+                if (sqrt((utm_EN.first - it->first)*(utm_EN.first - it->first)+(utm_EN.second - it->second)*(utm_EN.second - it->second)) >= 15 )
+                {
+                    double mindist = 100;
+                    int minIndex = 1;
+                    for(auto it2 = utmRecord_load.begin(); it2 != utmRecord_load.end(); ++it2)
+                    {
+                        double dist = (utm_EN.first - it2->first)*(utm_EN.first - it2->first)+(utm_EN.second - it2->second)*(utm_EN.second - it2->second);
+                        if (dist < mindist)
+                        {
+                            mindist = dist;
+                            minIndex = (it2 - utmRecord_load.begin()) + 1;
+                        }
+                    }                       
+                    ++mismatchNumber;
+                    cout<<"this frame is mismatch! ! ! ! !"<<endl;
+                    std::ofstream gpsFail;
+                    gpsFail.open(gpsFail_path, std::ios::app);
+                    int FailFrameID = currentFrameID + 1;
+                    gpsFail<<std::setprecision(15)<<utm_EN.first<<" "<<utm_EN.second<<" "<<FailFrameID<<" "<<misFlag<<" "<<minIndex<<endl;
+                    gpsFail.close();
+                }
+            }
+            cout << "------" << "currentFrameID: " << ++currentFrameID << "     failNumber: " << failNumber << "     mismatchNumber: "<< mismatchNumber << "------"<<endl;
         }
         else
         {
             std::cout.precision(3); 
             cout << "[Not Relocalize] Nearest distance: " << min_dist << "between current pointcloud and " << nn_idx << "." << endl;
             cout << "[Not Relocalize] yaw diff: " << nn_align * PC_UNIT_SECTORANGLE << " deg." << endl;
-            cout << "------------------------------------------------------" << count << "----------------------------------"<<endl;
-            count++;
+            double mindist = 100;
+            int minIndex = 1;
+            for(auto it2 = utmRecord_load.begin(); it2 != utmRecord_load.end(); ++it2)
+            {
+                double dist = (utm_EN.first - it2->first)*(utm_EN.first - it2->first)+(utm_EN.second - it2->second)*(utm_EN.second - it2->second);
+                if (dist < mindist)
+                {
+                    mindist = dist;
+                    minIndex = (it2 - utmRecord_load.begin()) + 1;
+                }
+            }               
+            std::ofstream gpsFail;
+            gpsFail.open(gpsFail_path, std::ios::app);
+            int FailFrameID = currentFrameID + 1;
+            gpsFail<<std::setprecision(15)<<utm_EN.first<<" "<<utm_EN.second<<" "<<FailFrameID<<" "<<failFlag<<" "<<minIndex<<endl;
+            gpsFail.close();
+            cout << "------" << "currentFrameID: " << ++currentFrameID << "     failNumber: " << ++failNumber << "     mismatchNumber: "<< mismatchNumber << "------"<<endl;
         }
         
 

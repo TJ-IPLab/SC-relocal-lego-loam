@@ -44,6 +44,10 @@ using SCPointType = pcl::PointXYZI; // using xyz only. but a user can exchange t
 using KeyMat = std::vector<std::vector<float> >;
 using InvKeyTree = KDTreeVectorOfVectorsAdaptor< KeyMat, float >;
 
+extern std::vector<std::pair<double,double>> utmRecord;
+extern std::vector<std::pair<double,double>> utmRecord_load;
+extern std::pair<double,double> utm_EN;
+extern std::pair<double,double> utm_EN_load;
 
 // namespace SC2
 // {
@@ -76,6 +80,8 @@ public:
     void makeAndSaveScancontextAndKeys( pcl::PointCloud<SCPointType> & _scan_down );
     std::pair<int, float> detectLoopClosureID( void ); // int: nearest node index, float: relative yaw
     void setThres(double thres);
+    void setgpsFailPath(std::string gpsFailPath);
+    void setDescriptor(std::string descriptor);
     std::pair<int, float> detectRelocalID( pcl::PointCloud<SCPointType> & _scan_down ); // int: nearest node index, float: relative yaw
 
 public:
@@ -100,6 +106,9 @@ public:
     // config 
     const int    TREE_MAKING_PERIOD_ = 10; // i.e., remaking tree frequency, to avoid non-mandatory every remaking, to save time cost / in the LeGO-LOAM integration, it is synchronized with the loop detection callback (which is 1Hz) so it means the tree is updated evrey 10 sec. But you can use the smaller value because it is enough fast ~ 5-50ms wrt N.
     int          tree_making_period_conter = 0;
+
+    std::string gpsFail_path = "/home/zeng/catkin_ws/data/pre_map/name.txt";
+    std::string descriptorType = "sci";
 
     // data 
     std::vector<double> polarcontexts_timestamp_; // optional.
