@@ -68,19 +68,22 @@ public:
     Eigen::MatrixXd makeTransformScancontext( pcl::PointCloud<SCPointType> & _scan_down, int trans_x, int trans_y );
     cv::Mat createSci (Eigen::MatrixXd &scsc);
     cv::Mat addAxes(cv::Mat &sci,std::string title);
-    Eigen::Matrix<std::vector<float>, Dynamic, Dynamic> down_resolution( Eigen::MatrixXd &_desc );
+    void show_diff(std::vector<std::tuple<double, int, int, cv::Mat>> diff_vector /*1.distance 2.index 3.align 4.diff_image*/);
+    Eigen::Matrix<std::vector<float>, Dynamic, Dynamic> down_resolution(Eigen::MatrixXd &_desc);
 
     int fastAlignUsingVkey ( MatrixXd & _vkey1, MatrixXd & _vkey2 ); 
     double distDirectSC ( MatrixXd &_sc1, MatrixXd &_sc2 ); // "d" (eq 5) in the original paper (IROS 18)
-    double distDirectSC(MatrixXd &_sc1, Eigen::Matrix<std::vector<float>, Dynamic, Dynamic> &_sc2_downres);
+    double distDirectSC(MatrixXd &_sc1, Eigen::Matrix<std::vector<float>, Dynamic, Dynamic> &_sc2_downres, cv::Mat &diff_image);
     std::pair<double, int> distanceBtnScanContext(MatrixXd &_sc1, MatrixXd &_sc2); // "D" (eq 6) in the original paper (IROS 18)
-    std::pair<double, int> distanceBtnScanContext(MatrixXd &_sc1, MatrixXd &_sc2, Eigen::Matrix<std::vector<float>, Dynamic, Dynamic> &_sc2_down, std::pair<double, int> &result_res_1);
+    std::pair<double, int> distanceBtnScanContext(MatrixXd &_sc1, MatrixXd &_sc2,
+                                                  Eigen::Matrix<std::vector<float>, Dynamic, Dynamic> &_sc2_down, std::pair<double, int> &result_res_1,
+                                                  cv::Mat &diff_image);
 
     // User-side API
     void makeAndSaveScancontextAndKeys( pcl::PointCloud<SCPointType> & _scan_down );
     std::pair<int, float> detectLoopClosureID( void ); // int: nearest node index, float: relative yaw
     void setThres(double thres);
-    std::pair<int, float> detectRelocalID( pcl::PointCloud<SCPointType> & _scan_down ); // int: nearest node index, float: relative yaw
+    std::pair<int, float> detectRelocalID( pcl::PointCloud<SCPointType> & _scan_down, std::vector<int> &kd_candi ); // int: nearest node index, float: relative yaw
 
 public:
     // hyper parameters ()

@@ -112,6 +112,9 @@ private:
     std::string SceneFolder;
     int relocalHz;
     int relocalNum;
+    ofstream outpose;
+    ifstream inpose;
+    pcl::PointCloud<PointTypePose>::Ptr premap_KeyPoses6D;
 
     NonlinearFactorGraph gtSAMgraph;
     Values initialEstimate;
@@ -371,6 +374,7 @@ public:
 
         cloudKeyPoses3D.reset(new pcl::PointCloud<PointType>());
         cloudKeyPoses6D.reset(new pcl::PointCloud<PointTypePose>());
+        premap_KeyPoses6D.reset(new pcl::PointCloud<PointTypePose>());
 
         kdtreeSurroundingKeyPoses.reset(new pcl::KdTreeFLANN<PointType>());
         kdtreeHistoryKeyPoses.reset(new pcl::KdTreeFLANN<PointType>());
@@ -735,7 +739,9 @@ public:
             std::unique_lock<std::mutex> unilock(mtx_cv);
             cv.wait(unilock, [&] { return premap_processed; });
             // std::cout << "start detectRelocalID ..." << std::endl;
-            auto localizeResult = scManager.detectRelocalID(*thisRawCloudKeyFrame);
+            std::vector<int> candidate_kdtree;
+            auto localizeResult = scManager.detectRelocalID(*thisRawCloudKeyFrame, candidate_kdtree);
+            
             sci_localized = true;
             localizeResultIndex = localizeResult.first;
             YawDiff = localizeResult.second;
@@ -923,7 +929,71 @@ public:
             std::lock_guard<std::mutex> lock_1(mtx_cv);
             files = getFiles(SceneFolder);
             std::string pcdpath;
-            std::cout << "loading... please wait" << pcdpath << std::endl;
+            std::cout << "loading... please wait" << std::endl;
+            std::string keypose_txt = getenv("HOME");
+            keypose_txt += "/catkin_ws/data/pre_map/keypose_" + initScene + ".txt";
+            inpose.open(keypose_txt);
+            PointTypePose onePose6D;
+            const int cnt = 8;
+            std::string line;
+            float readnum = 0;
+            int j = 0;
+            size_t comma = 0;
+            size_t comma2 = 0;
+
+            while (!inpose.eof())
+            {
+                getline(inpose, line);
+                std::cout << "getline:" << line << std::endl;
+
+                comma = line.find(',', 0);
+                readnum = atof(line.substr(0, comma).c_str());
+                onePose6D.x = readnum;
+                while (comma < line.size() && j != cnt - 1)
+                {
+                    comma2 = line.find(',', comma + 1);
+                    readnum = atof(line.substr(comma + 1, comma2 - comma - 1).c_str());
+                    switch (j)
+                    {
+                    case 0:
+                        onePose6D.y = readnum;
+                        break;
+                    case 1:
+                        onePose6D.z = readnum;
+                        break;
+                    case 2:
+                        onePose6D.intensity = readnum;
+                        break;
+                    case 3:
+                        onePose6D.roll = readnum;
+                        break;
+                    case 4:
+                        onePose6D.pitch = readnum;
+                        break;
+                    case 5:
+                        onePose6D.yaw = readnum;
+                        break;
+                    case 6:
+                        onePose6D.time = readnum;
+                        break;
+                    }
+                    ++j;
+                    comma = comma2;
+                }
+                std::cout << onePose6D.x << ","
+                          << onePose6D.y << ","
+                          << onePose6D.z << ","
+                          << onePose6D.intensity << ","
+                          << onePose6D.roll << ","
+                          << onePose6D.pitch << ","
+                          << onePose6D.yaw << ","
+                          << onePose6D.time << std::endl;
+                if (premap_KeyPoses6D->size()==0 || premap_KeyPoses6D->points[premap_KeyPoses6D->size() - 1].intensity == onePose6D.intensity - 1)
+                    premap_KeyPoses6D->push_back(onePose6D);
+                j = 0;
+            }
+            inpose.close();
+            std::cout << premap_KeyPoses6D->size() << " keyposes are loaded." << std::endl;
 
             for (int i = 0; i < initMapFrameNum;i++){
                 pcdpath = SceneFolder + files[i];
@@ -1836,6 +1906,19 @@ public:
             rawDS_path += to_string(laserCloudRawTime) + "_";
             rawDS_path += to_string(cloudKeyPoses3D->points.size()) + "th_keyframe.pcd";
             pcl::io::savePCDFileASCII(rawDS_path, *laserCloudRawDS);
+            std::string keypose_txt = getenv("HOME");
+            keypose_txt += "/catkin_ws/data/pre_map/keypose_" + initScene + ".txt";
+            outpose.open(keypose_txt, std::ios::app);
+            outpose << cloudKeyPoses6D->points[cloudKeyPoses6D->points.size() - 1].x << ","
+                    << cloudKeyPoses6D->points[cloudKeyPoses6D->points.size() - 1].y << ","
+                    << cloudKeyPoses6D->points[cloudKeyPoses6D->points.size() - 1].z << ","
+                    << cloudKeyPoses6D->points[cloudKeyPoses6D->points.size() - 1].intensity << ","
+                    << cloudKeyPoses6D->points[cloudKeyPoses6D->points.size() - 1].roll << ","
+                    << cloudKeyPoses6D->points[cloudKeyPoses6D->points.size() - 1].pitch << ","
+                    << cloudKeyPoses6D->points[cloudKeyPoses6D->points.size() - 1].yaw << ","
+                    << cloudKeyPoses6D->points[cloudKeyPoses6D->points.size() - 1].time << "\n";
+            outpose.close();
+            std::cout << "out pose: " << cloudKeyPoses6D->points.size() - 1 << " to txt: " << keypose_txt << std::endl;
         }
         else { // v1 uses thisSurfKeyFrame, it also works. (empirically checked at Mulran dataset sequences)
             scManager.makeAndSaveScancontextAndKeys(*thisSurfKeyFrame); 

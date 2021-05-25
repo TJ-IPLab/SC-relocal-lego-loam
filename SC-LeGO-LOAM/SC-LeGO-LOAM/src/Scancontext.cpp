@@ -3,17 +3,18 @@
 // namespace SC2
 // {
 #include "opencv2/opencv.hpp"
+#include <tuple>
 
 const int scale = 10;
 const float maxz = 23.7;
 
 cv::Mat SCManager::createSci (Eigen::MatrixXd &scsc)
 {
-    int a = scsc.rows()*scale, b = scsc.cols()*scale;
-    cv::Mat sc = cv::Mat(a,b,CV_8UC1);  
+    int a = scsc.rows() * scale, b = scsc.cols() * scale;
+    cv::Mat sc = cv::Mat(a, b, CV_8UC1);
 
-//relative height to determine the pixel
-/**
+    //relative height to determine the pixel
+    /**
     double maxz=0;
     for(int i = 0; i < scsc.rows(); i++)
     for(int j = 0; j < scsc.cols(); j++)
@@ -24,17 +25,20 @@ cv::Mat SCManager::createSci (Eigen::MatrixXd &scsc)
 **/
 
     for (int i = 0; i < scsc.rows(); i++)
-    for (int j = 0; j < scsc.cols(); j++)
     {
-        uchar pixel=floor(255*scsc(i,j)/maxz);
-        for (int u = i*scale;u < (i+1)*scale;u++)
-        for (int v = j*scale;v < (j+1)*scale;v++)
+        for (int j = 0; j < scsc.cols(); j++)
         {
-            sc.at<uchar>(u,v) = pixel;
+            uchar pixel = floor(255 * scsc(i, j) / maxz);
+            for (int u = i * scale; u < (i + 1) * scale; u++)
+                for (int v = j * scale; v < (j + 1) * scale; v++)
+                {
+                    sc.at<uchar>(u, v) = pixel;
+                }
         }
     }
     cv::Mat sci;
-    cv::applyColorMap(sc,sci,cv::COLORMAP_JET);
+    cv::applyColorMap(sc, sci, cv::COLORMAP_JET);
+    
     return sci;
 }
 
@@ -50,6 +54,26 @@ cv::Mat SCManager::addAxes(cv::Mat &sci,std::string title)
 	drawAxes.DrawLabel_X(xlabel, 0, 60, 6, cv::Scalar(0, 0, 0));
 	drawAxes.DrawTitle(title_name);
     return ImageAddAxes;
+}
+
+void SCManager::show_diff(std::vector<std::tuple<double, int, int, cv::Mat>> diff_vector/*1.distance 2.index 3.align 4.diff_image*/)
+{
+    for (int index = 0; index < 3; index++)
+    {
+        std::cout << "diff_vector.first(distance): " << std::get<0>(diff_vector[index]) << std::endl;
+        std::cout << "diff_vector.second(index): " << std::get<1>(diff_vector[index]) << std::endl;
+        std::cout << "diff_vector.third(align): " << std::get<2>(diff_vector[index]) << std::endl;
+
+        // Eigen::MatrixXd scShift_candi = circshift(polarcontexts_[std::get<1>(diff_vector[index])],std::get<2>(diff_vector[index]));
+        // Eigen::MatrixXd diff = scShift_candi - sc;
+        // cv::Mat sciForWhitePoint_candi = createSci(diff);
+        // cv::Mat sciForWhitePointAddAxes_candi = addAxes(sciForWhitePoint_candi,"     diff between sc and " + std::to_string(index));
+
+        cv::Mat shown_diff_image = addAxes(std::get<3>(diff_vector[index]), "diff between sc and " + std::to_string(index));
+        cv::imshow("diff between sc and " + std::to_string(index), shown_diff_image);
+        cv::moveWindow("diff between sc and " + std::to_string(index), 50, 50 + 400 * (index));
+        cv::waitKey(1);
+    }
 }
 
 MatrixXd SCManager::makeTransformScancontext( pcl::PointCloud<SCPointType> & _scan_down, int trans_x, int trans_y )
@@ -207,10 +231,15 @@ double SCManager::distDirectSC ( MatrixXd &_sc1, MatrixXd &_sc2 )
 
 } // distDirectSC
 
-double SCManager::distDirectSC ( MatrixXd &_sc1, Eigen::Matrix<std::vector<float>, Dynamic, Dynamic> &_sc2_downres )
+double SCManager::distDirectSC(MatrixXd &_sc1, Eigen::Matrix<std::vector<float>, Dynamic, Dynamic> &_sc2_downres,
+                               cv::Mat &diff_image)
 {
     int num_eff_cols = 0; // i.e., to exclude all-nonzero sector
     double sum_sector_similarity = 0;
+
+    int a = _sc1.rows() * scale, b = _sc1.cols() * scale;
+    cv::Mat sc_diff = cv::Mat(a, b, CV_8UC1);
+
     for ( int col_idx = 0; col_idx < _sc1.cols(); col_idx++ )
     {
         VectorXd col_sc1 = _sc1.col(col_idx);
@@ -230,15 +259,29 @@ double SCManager::distDirectSC ( MatrixXd &_sc1, Eigen::Matrix<std::vector<float
 
         double sector_similarity = col_sc1.dot(col_sc2) / (col_sc1.norm() * col_sc2.norm());
 
+        // uchar pixel = floor(255 * (1 - sector_similarity));
+        for (int row_idx = 0; row_idx < _sc1.rows(); row_idx++)
+        {
+            uchar pixel = floor(255 * abs(col_sc1(row_idx) - col_sc2(row_idx)) / maxz);
+            for (int u = row_idx * scale; u < (row_idx + 1) * scale; u++)
+            {
+                for (int v = col_idx * scale; v < (col_idx + 1) * scale; v++)
+                {
+                    sc_diff.at<uchar>(u, v) = pixel;
+                }
+            }
+        }
+
         sum_sector_similarity = sum_sector_similarity + sector_similarity;
         num_eff_cols = num_eff_cols + 1;
     }
-    
+
+    cv::applyColorMap(sc_diff, diff_image, cv::COLORMAP_JET);
+
     double sc_sim = sum_sector_similarity / num_eff_cols;
     return 1.0 - sc_sim;
 
 } // distDirectSC
-
 
 int SCManager::fastAlignUsingVkey( MatrixXd & _vkey1, MatrixXd & _vkey2)
 {
@@ -297,11 +340,14 @@ std::pair<double, int> SCManager::distanceBtnScanContext( MatrixXd &_sc1, Matrix
 
 } // distanceBtnScanContext
 
-std::pair<double, int> SCManager::distanceBtnScanContext( MatrixXd &_sc1, MatrixXd &_sc2, Eigen::Matrix<std::vector<float>, Dynamic, Dynamic> &_sc2_down, std::pair<double, int> &result_res_1 )
+std::pair<double, int> SCManager::distanceBtnScanContext(MatrixXd &_sc1, MatrixXd &_sc2,
+                                                         Eigen::Matrix<std::vector<float>, Dynamic, Dynamic> &_sc2_down, 
+                                                         std::pair<double, int> &result_res_1,
+                                                         cv::Mat &diff_image)
 {
     // 1. fast align using variant key (not in original IROS18)
-    MatrixXd vkey_sc1 = makeSectorkeyFromScancontext( _sc1 );
-    MatrixXd vkey_sc2 = makeSectorkeyFromScancontext( _sc2 );
+    MatrixXd vkey_sc1 = makeSectorkeyFromScancontext(_sc1);
+    MatrixXd vkey_sc2 = makeSectorkeyFromScancontext(_sc2);
     int argmin_vkey_shift = fastAlignUsingVkey( vkey_sc1, vkey_sc2 );
 
     const int SEARCH_RADIUS = round( 0.5 * SEARCH_RATIO * _sc1.cols() ); // a half of search range 
@@ -323,7 +369,7 @@ std::pair<double, int> SCManager::distanceBtnScanContext( MatrixXd &_sc1, Matrix
         MatrixXd sc2_shifted = circshift(_sc2, num_shift);
         Eigen::Matrix<std::vector<float>, Dynamic, Dynamic> sc2_shifted_downres = circshift(_sc2_down, num_shift);
         double cur_sc_dist = distDirectSC( _sc1, sc2_shifted );
-        double cur_sc_dist_downres = distDirectSC( _sc1, sc2_shifted_downres );
+        double cur_sc_dist_downres = distDirectSC( _sc1, sc2_shifted_downres, diff_image );
         if( cur_sc_dist < min_sc_dist )
         {
             argmin_shift = num_shift;
@@ -574,7 +620,11 @@ void SCManager::setThres( double thres )
 
 } // SCManager::setThres
 
-std::pair<int, float> SCManager::detectRelocalID( pcl::PointCloud<SCPointType> & _scan_down )
+bool cmp(const std::tuple<double, int, int, cv::Mat> a, const std::tuple<double, int, int, cv::Mat> b) {
+    return std::get<0>(a) < std::get<0>(b); //自定义的比较函数
+}
+
+std::pair<int, float> SCManager::detectRelocalID( pcl::PointCloud<SCPointType> & _scan_down, std::vector<int> &kd_candi )
 {
     Eigen::MatrixXd sc = makeScancontext(_scan_down); // v1 
     Eigen::MatrixXd ringkey = makeRingkeyFromScancontext( sc );
@@ -625,29 +675,43 @@ std::pair<int, float> SCManager::detectRelocalID( pcl::PointCloud<SCPointType> &
      */
     TicToc t_calc_dist;
     std::pair<double, int> sc_dist_result_res_1;
+    std::vector<std::tuple<double, int, int, cv::Mat>> results;//first(distance) second(index) third(align) fourth(diff_image)
     for (int candidate_iter_idx = 0; candidate_iter_idx < NUM_CANDIDATES_FROM_TREE; candidate_iter_idx++)
     {
-        MatrixXd polarcontext_candidate = polarcontexts_[ candidate_indexes[candidate_iter_idx] ];
+        std::cout << "calculating diff between cur and " << candidate_indexes[candidate_iter_idx] << std::endl;
+        kd_candi.push_back(candidate_indexes[candidate_iter_idx]);
+        cv::Mat one_diff_image;
+        MatrixXd polarcontext_candidate = polarcontexts_[candidate_indexes[candidate_iter_idx]];
         Eigen::Matrix<std::vector<float>, Dynamic, Dynamic> polarcontext_candidate_multires_1 = polarcontexts_multires_1_[ candidate_indexes[candidate_iter_idx] ];
-        std::pair<double, int> sc_dist_result = distanceBtnScanContext( curr_desc, polarcontext_candidate, polarcontext_candidate_multires_1, sc_dist_result_res_1 ); 
-        
+        std::pair<double, int> sc_dist_result = distanceBtnScanContext( curr_desc, polarcontext_candidate );
+
         double candidate_dist = sc_dist_result.first;
         int candidate_align = sc_dist_result.second;
 
         // use multires-1 to relocal
-        candidate_dist = sc_dist_result_res_1.first;
-        candidate_align = sc_dist_result_res_1.second;
+
+        // sc_dist_result = distanceBtnScanContext(curr_desc, polarcontext_candidate,
+        //                                                                polarcontext_candidate_multires_1,
+        //                                                                sc_dist_result_res_1,
+        //                                                                one_diff_image);
+        // candidate_dist = sc_dist_result_res_1.first;
+        // candidate_align = sc_dist_result_res_1.second;
+        // results.emplace_back(std::tuple<double, int, int, cv::Mat>{candidate_dist, candidate_indexes[candidate_iter_idx],
+        //                                                            candidate_align, one_diff_image});
 
         if( candidate_dist < min_dist )
         {
             min_dist = candidate_dist;
             nn_align = candidate_align;
-            // sc_dist_result_res_1 = distanceBtnScanContext( curr_desc, polarcontext_candidate_multires_1 ); 
-
             nn_idx = candidate_indexes[candidate_iter_idx];
         }
     }
     t_calc_dist.toc("Distance calc");
+    if (results.size() != 0)
+    {
+        std::sort(results.begin(), results.end(), cmp);
+        show_diff(results);
+    }
     // std::cout << "start detectRelocalID ... pairwise distance calculate finished" << std::endl;
 
     /* 
@@ -692,6 +756,8 @@ std::pair<int, float> SCManager::detectRelocalID( pcl::PointCloud<SCPointType> &
 
     cv::imshow("red point",sciForRedPointAddAxes);
     cv::imshow("white point",sciForWhitePointAddAxes);
+    cv::moveWindow("red point", 800, 50);
+    cv::moveWindow("white point", 1600, 50);
     cv::waitKey(1);
 
 // --------------------------------------------------create sc image--------------------------------------
@@ -701,24 +767,34 @@ std::pair<int, float> SCManager::detectRelocalID( pcl::PointCloud<SCPointType> &
         loop_id = nn_idx; 
     
         // std::cout.precision(3); 
-        cout << "[Relocalize found] Nearest distance: " << min_dist << " between current pointcloud and " << nn_idx << "." << endl;
-        cout << "[Relocalize found] yaw diff: " << nn_align * PC_UNIT_SECTORANGLE << " deg." << endl;
-        cout << "-------------------------------------------------" << relocal_count << "----------------------------------"<<endl;
+        if (results.size() == 0)
+        {
+            cout << "[found]         Nearest distance: " << min_dist << " between current pointcloud and " << nn_idx << "." << endl;
+            cout << "[found]         yaw diff: " << nn_align * PC_UNIT_SECTORANGLE << " deg." << endl;
+        }
+        else
+        {
+            cout << "[MR1 found]     Nearest distance: " << sc_dist_result_res_1.first << " between current pointcloud and " << nn_idx << "." << endl;
+            cout << "[MR1 found]     yaw diff: " << sc_dist_result_res_1.second * PC_UNIT_SECTORANGLE << " deg." << endl;
+        }
+        cout << "---------------------------------- complete: " << relocal_count << " ----------------------------------"<<endl;
         relocal_count++;
-
-        cout << "[Relocalize found] multi_resolution_1 Nearest distance: " << sc_dist_result_res_1.first << " between current pointcloud and " << nn_idx << "." << endl;
-        cout << "[Relocalize found] multi_resolution_1 yaw diff: " << sc_dist_result_res_1.second * PC_UNIT_SECTORANGLE << " deg." << endl;
     }
     else
     {
-        std::cout.precision(3); 
-        cout << "[Not Relocalize] Nearest distance: " << min_dist << "between current pointcloud and " << nn_idx << "." << endl;
-        cout << "[Not Relocalize] yaw diff: " << nn_align * PC_UNIT_SECTORANGLE << " deg." << endl;
+        // std::cout.precision(3); 
+        if (results.size() == 0)
+        {
+            cout << "[Not found]     Nearest distance: " << min_dist << "between current pointcloud and " << nn_idx << "." << endl;
+            cout << "[Not found]     yaw diff: " << nn_align * PC_UNIT_SECTORANGLE << " deg." << endl;
+        }
+        else
+        {
+            cout << "[MR1 Not found] Nearest distance: " << sc_dist_result_res_1.first << " between current pointcloud and " << nn_idx << "." << endl;
+            cout << "[MR1 Not found] yaw diff: " << sc_dist_result_res_1.second * PC_UNIT_SECTORANGLE << " deg." << endl;
+        }
         cout << "------------------------------------------------------" << relocal_count << "----------------------------------"<<endl;
         relocal_count++;
-
-        cout << "[Not Relocalize] multi_resolution_1 Nearest distance: " << sc_dist_result_res_1.first << " between current pointcloud and " << nn_idx << "." << endl;
-        cout << "[Not Relocalize] multi_resolution_1 yaw diff: " << sc_dist_result_res_1.second * PC_UNIT_SECTORANGLE << " deg." << endl;
     }
 
     // To do: return also nn_align (i.e., yaw diff)
