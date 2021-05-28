@@ -32,13 +32,13 @@ int th[num] ={83,84,124,125,126,133,134,138,334,1241};
 for(int jk = 0; jk < num; ++jk)
     {
         char path[100];
-        sprintf(path,"/home/zeng/caculateSCI/1/%d.pcd",th[jk]);
+        sprintf(path,"/home/ubuwgb/caculateSCI/1/%d.pcd",th[jk]);
         pcl::PointCloud<pcl::PointXYZI>::Ptr loadRawCloud1(new pcl::PointCloud<pcl::PointXYZI>());
         pcl::io::loadPCDFile(path, *loadRawCloud1);
         Eigen::MatrixXd sc1 = scManager.makeScancontext(*loadRawCloud1);
         cv::Mat sci1 = scManager.createSci(sc1);
         char name[100];
-        sprintf(name,"/home/zeng/caculateSCI/1/%d.png",th[jk]);
+        sprintf(name,"/home/ubuwgb/caculateSCI/1/%d.png",th[jk]);
         cv::imwrite(name,sci1);
     }
 }

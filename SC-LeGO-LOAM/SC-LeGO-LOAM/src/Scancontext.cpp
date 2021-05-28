@@ -855,7 +855,6 @@ std::pair<int, float> SCManager::detectRelocalID( pcl::PointCloud<SCPointType> &
 //-----------------------------------------transform------------------------------------------------------------
 
 // --------------------------------------------------create sc image--------------------------------------
-
     cv::Mat sciForRedPoint = createSci(sc);
     cv::Mat sciForRedPointAddAxes = addAxes(sciForRedPoint,"     red point");
 
@@ -866,7 +865,6 @@ std::pair<int, float> SCManager::detectRelocalID( pcl::PointCloud<SCPointType> &
     cv::imshow("red point",sciForRedPointAddAxes);
     cv::imshow("white point",sciForWhitePointAddAxes);
     cv::waitKey(1);
-
 // --------------------------------------------------create sc image--------------------------------------
 
     int pointNum = _scan_down.points.size();
@@ -878,7 +876,10 @@ std::pair<int, float> SCManager::detectRelocalID( pcl::PointCloud<SCPointType> &
         // std::cout.precision(3); 
         cout << "[Relocalize found] Nearest distance: " << min_dist << " between current pointcloud and " << nn_idx << "." << endl;
         cout << "[Relocalize found] yaw diff: " << nn_align * PC_UNIT_SECTORANGLE << " deg." << endl;
-        if(nn_idx <= utmRecord_load.size())
+        cout << std::setprecision(15) << "[GPS evaluation] relocal-frame GPS: " << fusionRecord_load[nn_idx].pose.position.x
+             << ", " << fusionRecord_load[nn_idx].pose.position.y << endl;
+        cout << "[GPS evaluation] current GPS: " << utm_EN.first << ", " << utm_EN.second << endl;
+        if (nn_idx <= utmRecord_load.size())
         {
             auto it = utmRecord_load.begin()+nn_idx;
             if (sqrt((utm_EN.first - it->first)*(utm_EN.first - it->first)+(utm_EN.second - it->second)*(utm_EN.second - it->second)) >= 15 )
