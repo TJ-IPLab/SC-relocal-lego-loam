@@ -1241,8 +1241,37 @@ public:
         pcl::io::savePCDFileASCII(fileDirectory + "trajectory.pcd", *cloudKeyPoses3D);
     }
 
+    bool load_map_flag = true
     void publishGlobalMap()
     {
+        // if(load_map_flag){
+        // std::lock_guard<std::mutex> lock_1(mtx_cv);
+        // files = getFiles(SceneFolder);
+        // std::string pcdpath;
+        // std::cout << "loading... please wait" << pcdpath << std::endl;
+
+        // FILE *gpsIn;
+        // double utm_e,utm_n;
+        // gpsIn = fopen(gpstxt_path.c_str(),"r");
+        // int i = 0;
+        // while(i < 7000)
+        // {
+        //     fscanf(gpsIn, "%lf %lf\n", &utm_e, &utm_n);
+        //     utm_EN.first = utm_e;
+        //     utm_EN.second = utm_n;
+        //     if (utm_e == 0 && utm_n == 0)
+        //     {
+        //         ++i;
+        //         continue;
+        //     }
+        //     utmRecord.push_back(utm_EN);
+        //     ++i;
+
+        // }
+        // std::cout << "loading finish" << pcdpath << std::endl;
+        // load_map_flag = false;
+        // cv.notify_one();
+        // }
 
         if (pubLaserCloudSurround.getNumSubscribers() == 0)
             return;

@@ -882,7 +882,7 @@ std::pair<int, float> SCManager::detectRelocalID( pcl::PointCloud<SCPointType> &
         if (nn_idx <= utmRecord_load.size())
         {
             auto it = utmRecord_load.begin()+nn_idx;
-            if (sqrt((utm_EN.first - it->first)*(utm_EN.first - it->first)+(utm_EN.second - it->second)*(utm_EN.second - it->second)) >= 15 )
+            if (sqrt((utm_EN.first - it->first)*(utm_EN.first - it->first)+(utm_EN.second - it->second)*(utm_EN.second - it->second)) >= 8 )
             {
                 double mindist = 100;
                 int minIndex = 1;
@@ -913,7 +913,7 @@ std::pair<int, float> SCManager::detectRelocalID( pcl::PointCloud<SCPointType> &
     else
     {
         
-        if(min_dist < 0.7 && pointNum < 5500)
+        if(min_dist < 0.7 && pointNum < 1)
         {
             loop_id = nn_idx;
             cout << "[Relocalize found] Nearest distance: " << min_dist << " between current pointcloud and " << nn_idx << "." << endl;
@@ -921,7 +921,7 @@ std::pair<int, float> SCManager::detectRelocalID( pcl::PointCloud<SCPointType> &
             if(nn_idx <= utmRecord_load.size())
             {
                 auto it = utmRecord_load.begin()+nn_idx;
-                if (sqrt((utm_EN.first - it->first)*(utm_EN.first - it->first)+(utm_EN.second - it->second)*(utm_EN.second - it->second)) >= 15 )
+                if (sqrt((utm_EN.first - it->first)*(utm_EN.first - it->first)+(utm_EN.second - it->second)*(utm_EN.second - it->second)) >= 8 )
                 {
                     double mindist = 100;
                     int minIndex = 1;
