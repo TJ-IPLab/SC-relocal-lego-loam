@@ -7,12 +7,12 @@
     <param name="/generateMap" value="false" />
 
     <!--定位和建图都要改-->
-    <param name="/Scene" value="yuanqu_3.5m" />
-    <param name="/gpstxt_path" value="/home/ubuwgb/catkin_ws/data/pre_GPS/gpsOfKeyframe_yuanqu_3.5m.txt" />
+    <param name="/Scene" value="3.5m_yuanqu_map" />
+    <param name="/gpstxt_path" value="/home/zeng/catkin_ws/data/pre_map/gps_3.5m_yuanqu_map.txt" />
 
     <!--定位要改-->
-    <param name="/MapFrameNum" value="12" />
-    <param name="/gpsFailPath" value="/home/ubuwgb/catkin_ws/data/pre_GPS/passOfKeyframe_yuanqu_3.5m.txt" />
+    <param name="/MapFrameNum" value="1824" />
+    <param name="/gpsFailPath" value="/home/zeng/catkin_ws/data/pre_map/pass.txt" />
     <param name="/descriptor" value="sci" />
     <param name="/Threshold" value="0.4" />
     <param name="/relocalHz" value="10" />
