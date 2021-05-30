@@ -479,6 +479,7 @@ public:
             if (skipFusionNum >= 10)
             {
                 skipFusionNum = 0;
+                double time = gps_msg.header.stamp.toSec();
                 double latitude = gps_msg.pose.position.x;
                 double longitude = gps_msg.pose.position.y;
                 double height = gps_msg.pose.position.z;
@@ -487,7 +488,7 @@ public:
                 double qz = gps_msg.pose.orientation.z;
                 double qw = gps_msg.pose.orientation.w;
                 LonLat2UTM(longitude, latitude, scManager.utm_EN.first, scManager.utm_EN.second);
-                // saveRelocalKeyFrame = true;
+                // saveRelocalKeyFrame = true; //使用另一种采集策略记得取消注释
                 if (!scManager.utmRecord.empty())
                 {
                     auto it = scManager.utmRecord.end() - 1;
@@ -501,22 +502,38 @@ public:
                         // write position to txtfile
                         std::ofstream gpsOut;
                         gpsOut.open(gpstxt_path, std::ios::app);
-                        gpsOut << setprecision(10) << scManager.utm_EN.first << " " << scManager.utm_EN.second
-                               << " " << height << " " << qx << " " << qy << " " << qz << " " << qw << endl;
+                        gpsOut << setprecision(15) << scManager.utm_EN.first << " " << scManager.utm_EN.second
+                                << " " << height << " " << qx << " " << qy << " " << qz << " " << qw << " " << time << endl;
                         pcdStillNotSave = true;
                         gpsOut.close();
                     }
+
+                //  补充建图:
+                //  1.改回调函数
+                //  2.改输入GPS.txt
+                //  3.改开始的帧数序号  
+                
+                // for (auto it = scManager.utmRecord.cbegin(); it != scManager.utmRecord.cend(); ++it)
+                // {
+                //     if (sqrt((scManager.utm_EN.first - it->first)*(scManager.utm_EN.first - it->first)+(scManager.utm_EN.second - it->second)*(scManager.utm_EN.second - it->second)) <= distThreshold )
+                //     {
+                //         saveRelocalKeyFrame = false;
+                //         break;
+                //     }
+                // }
+                // if (saveRelocalKeyFrame)
+                // {
+                //     scManager.utmRecord.push_back(scManager.utm_EN);
+                //     std::ofstream gpsOut;
+                //     gpsOut.open(gpstxt_path, std::ios::app);
+                //     gpsOut << setprecision(15) << scManager.utm_EN.first << " " << scManager.utm_EN.second
+                //            << " " << height << " " << qx << " " << qy << " " << qz << " " << qw << " " << time << endl;
+                //     pcdStillNotSave = true;
+                //     gpsOut.close();
+                // }
+                
                 }
-                /*
-                for (auto it = scManager.utmRecord.cbegin(); it != scManager.utmRecord.cend(); ++it)
-                {
-                    if (sqrt((scManager.utm_EN.first - it->first)*(scManager.utm_EN.first - it->first)+(scManager.utm_EN.second - it->second)*(scManager.utm_EN.second - it->second)) <= distThreshold )
-                    {
-                        saveRelocalKeyFrame = false;
-                        break;
-                    }
-                }
-                */
+
                 else
                 {
                     saveRelocalKeyFrame = true;
@@ -524,8 +541,8 @@ public:
                     scManager.utmRecord.push_back(scManager.utm_EN);
                     std::ofstream gpsOut;
                     gpsOut.open(gpstxt_path, std::ios::app);
-                    gpsOut << setprecision(10) << scManager.utm_EN.first << " " << scManager.utm_EN.second
-                            << " " << height << " " << qx << " " << qy << " " << qz << " " << qw << endl;
+                    gpsOut << setprecision(15) << scManager.utm_EN.first << " " << scManager.utm_EN.second
+                           << " " << height << " " << qx << " " << qy << " " << qz << " " << qw << " " << time << endl;
                     gpsOut.close();
                 }
             }
@@ -957,8 +974,8 @@ public:
             if (saveRelocalKeyFrame)
             {
                 std::string rawDS_path = SceneFolder;
-                rawDS_path += to_string(save_startind) + "th_keyframe_";
-                rawDS_path += to_string(laserCloudRawTime) + ".pcd";
+                rawDS_path += to_string(laserCloudRawTime) + '_';
+                rawDS_path += to_string(save_startind) + "th_keyframe" +  + ".pcd";
                 cout << "handler: enter saveRelocalKeyFrame segment and save pcd at: ";
                 cout << rawDS_path << endl;
                 pcl::io::savePCDFileASCII(rawDS_path, *laserCloudRawDS);
@@ -985,13 +1002,13 @@ public:
             std::cout << "------ localizeResult.YawDiff: " << YawDiff << std::endl;
             unilock.unlock();
 
-            ++relocalSaveInd;
+            // ++relocalSaveInd;
 
-            std::string relocalPcdPath = getenv("HOME");
-            relocalPcdPath += "/catkin_ws/data/localizeFrame/";
-            relocalPcdPath += to_string(relocalSaveInd) + "th_relocalframe_";
-            relocalPcdPath += to_string(laserCloudRawTime) + ".pcd";
-            pcl::io::savePCDFileASCII(relocalPcdPath, *thisRawCloudKeyFrame);
+            // std::string relocalPcdPath = getenv("HOME");
+            // relocalPcdPath += "/catkin_ws/data/localizeFrame/";
+            // relocalPcdPath += to_string(relocalSaveInd) + "th_keyframe_";
+            // relocalPcdPath += to_string(laserCloudRawTime) + ".pcd";
+            // pcl::io::savePCDFileASCII(relocalPcdPath, *thisRawCloudKeyFrame);
 
             if (localizeResultIndex != -1)
             {
@@ -1250,12 +1267,12 @@ public:
             std::cout << "loading... please wait" << pcdpath << std::endl;
 
             FILE *gpsIn;
-            double utm_e, utm_n, height, qx, qy, qz, qw;
+            double time, utm_e, utm_n, height, qx, qy, qz, qw;
             geometry_msgs::PoseStamped onepose;
             gpsIn = fopen(gpstxt_path.c_str(), "r");
             for (int i = 0; i < MapFrameNum; i++)
             {
-                fscanf(gpsIn, "%lf %lf %lf %lf %lf %lf %lf\n", &utm_e, &utm_n, &height, &qx, &qy, &qz, &qw);
+                fscanf(gpsIn, "%lf %lf %lf %lf %lf %lf %lf %lf\n", &utm_e, &utm_n, &height, &qx, &qy, &qz, &qw, &time);
                 scManager.utm_EN_load.first = utm_e;
                 scManager.utm_EN_load.second = utm_n;
                 scManager.utmRecord_load.push_back(scManager.utm_EN_load);
@@ -1343,8 +1360,38 @@ public:
         pcl::io::savePCDFileASCII(fileDirectory + "trajectory.pcd", *cloudKeyPoses3D);
     }
 
+    // bool load_map_flag = true;
     void publishGlobalMap()
     {
+        // if(load_map_flag){
+        // std::lock_guard<std::mutex> lock_1(mtx_cv);
+        // files = getFiles(SceneFolder);
+        // std::string pcdpath;
+        // std::cout << "loading... please wait" << pcdpath << std::endl;
+
+        // FILE *gpsIn;
+        // std::pair<double,double> utm_EN;
+        // double time, utm_e, utm_n, height, qx, qy, qz, qw;
+        // gpsIn = fopen(gpstxt_path.c_str(),"r");
+        // int i = 1;
+        // while(i < save_startind)
+        // {
+        //     fscanf(gpsIn, "%lf %lf %lf %lf %lf %lf %lf %lf\n", &utm_e, &utm_n, &height, &qx, &qy, &qz, &qw, &time);
+        //     utm_EN.first = utm_e;
+        //     utm_EN.second = utm_n;
+        //     if (utm_e == 0 && utm_n == 0)
+        //     {
+        //         ++i;
+        //         continue;
+        //     }
+        //     scManager.utmRecord.push_back(utm_EN);
+        //     ++i;
+
+        // }
+        // std::cout << "loading finish" << pcdpath << std::endl;
+        // load_map_flag = false;
+        // cv.notify_one();
+        // }
 
         if (pubLaserCloudSurround.getNumSubscribers() == 0)
             return;
