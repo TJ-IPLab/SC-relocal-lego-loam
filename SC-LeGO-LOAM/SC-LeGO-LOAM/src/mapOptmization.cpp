@@ -56,7 +56,25 @@
 #include "geometry_msgs/PoseStamped.h"
 //#include "gnss_bestpose.h"
 
-int count1 = 0, count2 = 0, count3 = 0;
+int findIndex(string ori, /*string b, */string c)
+{
+    int index_f, index_l;
+    int index_gap;
+    // index_f = a.find(b) + 4;
+    index_f = 0;
+    index_l = ori.find(c);
+    index_gap = index_l - index_f;
+    return atoi((ori.substr(index_f, index_gap)).c_str());
+}
+int cmp(string a, string b)
+{
+    int c, d;
+    // c = findIndex(a, "Coin", ".bin");
+    // d = findIndex(b, "Coin", ".bin");
+    c = findIndex(a, "th_keyframe");
+    d = findIndex(b, "th_keyframe");
+    return  c < d;
+}
 vector<string> getFiles(string cate_dir)
 {
     vector<string> files; //存放文件名
@@ -95,7 +113,7 @@ vector<string> getFiles(string cate_dir)
     closedir(dir);
 
     //排序，按从小到大排序
-    sort(files.begin(), files.end());
+    sort(files.begin(), files.end(), cmp);
     return files;
 }
 
@@ -895,6 +913,33 @@ public:
         newLaserCloudOutlierLast = true;
     }
 
+    void quat2euler(geometry_msgs::Quaternion quat, double &roll, double &pitch, double &yaw)
+    {
+        double w = quat.w;
+        double x = quat.x;
+        double y = quat.y;
+        double z = quat.z;
+        // cout << "[quat2euler] w: " << w << ", x: " << x << ", y: " << y << ", z: " << z << endl;
+        double q11 = w*w;
+        double q12 = w*x;
+        double q13 = w*y;
+        double q14 = w*z; 
+        double q22 = x*x;
+        double q23 = x*y;
+        double q24 = x*z;     
+        double q33 = y*y;
+        double q34 = y*z;  
+        double q44 = z*z;
+        double C12=2*(q23-q14);
+        double C22=q11-q22+q33-q44;
+        double C31=2*(q24-q13);
+        double C32=2*(q34+q12);
+        double C33=q11-q22-q33+q44;
+        pitch = asin(C32);
+        roll = -atan2(C31, C33);
+        yaw = -atan2(C12, C22);
+    }
+
     void laserCloudRawHandler(const sensor_msgs::PointCloud2ConstPtr &msg)
     {
         if (!LocalizeFlag)
@@ -944,7 +989,7 @@ public:
 
             std::string relocalPcdPath = getenv("HOME");
             relocalPcdPath += "/catkin_ws/data/localizeFrame/";
-            relocalPcdPath += to_string(relocalSaveInd) + "th_keyframe_";
+            relocalPcdPath += to_string(relocalSaveInd) + "th_relocalframe_";
             relocalPcdPath += to_string(laserCloudRawTime) + ".pcd";
             pcl::io::savePCDFileASCII(relocalPcdPath, *thisRawCloudKeyFrame);
 
@@ -953,6 +998,63 @@ public:
                 std::string resultpath = SceneFolder + files[localizeResultIndex];
                 pcl::PointCloud<PointType>::Ptr resultpcd(new pcl::PointCloud<PointType>());
                 pcl::io::loadPCDFile(resultpath, *resultpcd);
+                cout << "[GPS evaluation] resultpcd's path: " << resultpath << endl;
+
+                pcl::IterativeClosestPoint<PointType, PointType> icp_relocal;
+                Eigen::Affine3f relocal_tune;
+                float x, y, z, roll, pitch, yaw;
+                icp_relocal.setMaxCorrespondenceDistance(100);
+                icp_relocal.setMaximumIterations(100);
+                icp_relocal.setTransformationEpsilon(1e-6);
+                icp_relocal.setEuclideanFitnessEpsilon(1e-6);
+                icp_relocal.setRANSACIterations(0);
+
+                // Align clouds
+                // Eigen::Affine3f icpInitialMatFoo = pcl::getTransformation(0, 0, 0, yawDiffRad, 0, 0); // because within cam coord: (z, x, y, yaw, roll, pitch)
+                // Eigen::Matrix4f icpInitialMat = icpInitialMatFoo.matrix();
+                icp_relocal.setInputSource(thisRawCloudKeyFrame);
+                icp_relocal.setInputTarget(resultpcd);
+                pcl::PointCloud<PointType>::Ptr unused_result(new pcl::PointCloud<PointType>());
+                icp_relocal.align(*unused_result);
+                // icp_relocal.align(*unused_result, icpInitialMat); // PCL icp non-eye initial is bad ... don't use (LeGO LOAM author also said pcl transform is weird.)
+
+                std::cout << "[GPS evaluation] ICP fit score: " << icp_relocal.getFitnessScore() << std::endl;
+                if (icp_relocal.hasConverged() == false || icp_relocal.getFitnessScore() > historyKeyframeFitnessScore)
+                {
+                    std::cout << "[GPS evaluation] warning: bad icp fit score, > " << historyKeyframeFitnessScore << std::endl;
+                }
+                if (icp_relocal.hasConverged() == true)
+                {
+                    relocal_tune = icp_relocal.getFinalTransformation(); // get transformation in camera frame (because points are in camera frame)
+                    pcl::getTranslationAndEulerAngles(relocal_tune, x, y, z, roll, pitch, yaw);
+                    std::cout << "[GPS evaluation] The fine-tune ICP result is "
+                              << "\n\tx: " << x
+                              << "\n\ty: " << y
+                              << "\n\tz: " << z
+                              << "\n\troll: " << roll
+                              << "\n\tyaw: " << yaw
+                              << "\n\tpitch: " << pitch << std::endl;
+                    // tf::Quaternion quat;
+                    // tf::quaternionMsgToTF(scManager.fusionRecord_load[localizeResultIndex].pose.orientation, quat);
+                    double roll_gps, pitch_gps, yaw_gps;
+                    // tf::Matrix3x3(quat).getRPY(roll_gps, pitch_gps, yaw_gps);
+                    quat2euler(scManager.fusionRecord_load[localizeResultIndex].pose.orientation, roll_gps, pitch_gps, yaw_gps);
+                    std::cout << "[GPS evaluation] The detected relocal frame's rpy is "
+                              << "\nroll: " << roll_gps
+                              << "\nyaw: " << pitch_gps
+                              << "\npitch: " << yaw_gps << std::endl;
+                    double relocal_x = scManager.fusionRecord_load[localizeResultIndex].pose.position.x;
+                    double relocal_y = scManager.fusionRecord_load[localizeResultIndex].pose.position.y;
+                    double heading = yaw_gps;
+                    relocal_x = relocal_x + x * sin(heading) + y * cos(heading);
+                    relocal_y = relocal_y - x * cos(heading) + y * sin(heading);
+                    std::cout << "[GPS evaluation] The relocal fine-tune GPS: "
+                              << "\n\trelocal_x: " << relocal_x
+                              << "\n\trelocal_y: " << relocal_y
+                              << "\n\tdiff_x: " << relocal_x - scManager.utm_EN.first
+                              << "\n\tdiff_y: " << relocal_y - scManager.utm_EN.second << endl;
+                }
+                cout << "\n\n\n";
                 for (int i = 0; i < resultpcd->points.size(); i++)
                 {
                     auto x = resultpcd->points[i].x * cos(YawDiff) - resultpcd->points[i].y * sin(YawDiff);
@@ -1162,9 +1264,9 @@ public:
                 onepose.pose.position.y = utm_n;
                 onepose.pose.position.z = height;
                 onepose.pose.orientation.x = qx;
-                onepose.pose.orientation.x = qy;
-                onepose.pose.orientation.x = qz;
-                onepose.pose.orientation.x = qw;
+                onepose.pose.orientation.y = qy;
+                onepose.pose.orientation.z = qz;
+                onepose.pose.orientation.w = qw;
                 scManager.fusionRecord_load.push_back(onepose);
                 cout << "loading GPS-record: " << utm_e << ", " << utm_n << endl;
 
