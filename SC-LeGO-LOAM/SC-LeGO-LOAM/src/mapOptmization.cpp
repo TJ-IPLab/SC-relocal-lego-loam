@@ -191,6 +191,7 @@ private:
     int localizeResultIndex;
     float YawDiff;
     vector<string> files;
+    pcl::PointCloud<PointType>::Ptr keyframeMap;
 
     NonlinearFactorGraph gtSAMgraph;
     Values initialEstimate;
@@ -215,6 +216,7 @@ private:
     ros::Publisher pubRegisteredCloud;
     ros::Publisher pubRelocalCloud;
     ros::Publisher pubTransformCloud;
+    ros::Publisher pubKeyframeMap;
 
     ros::Subscriber subLaserCloudRaw;
     ros::Subscriber subLaserCloudCornerLast;
@@ -426,6 +428,7 @@ public:
         pubRegisteredCloud = nh.advertise<sensor_msgs::PointCloud2>("/registered_cloud", 2);
         pubRelocalCloud = nh.advertise<sensor_msgs::PointCloud2>("/relocal_cloud", 2);
         pubTransformCloud = nh.advertise<sensor_msgs::PointCloud2>("/transform", 2);
+        pubKeyframeMap = nh.advertise<sensor_msgs::PointCloud2>("/keyframe_map", 10);
 
         float filter_size;
         downSizeFilterCorner.setLeafSize(0.2, 0.2, 0.2);
@@ -590,7 +593,7 @@ public:
 
     void allocateMemory()
     {
-
+        keyframeMap.reset(new pcl::PointCloud<PointType>());
         cloudKeyPoses3D.reset(new pcl::PointCloud<PointType>());
         cloudKeyPoses6D.reset(new pcl::PointCloud<PointTypePose>());
 
@@ -1258,6 +1261,81 @@ public:
         // }
     }
 
+    void combineKeyframeMap()
+    {
+        keyframeMap->clear();
+        double initRoll, initPitch, initHeading;
+        quat2euler(scManager.fusionRecord_load[0].pose.orientation, initRoll, initPitch, initHeading);
+        std::cout << "1th loaded frame's initHeading: " << initHeading << std::endl;
+        for (int i = 0; i < MapFrameNum; i++)
+        {
+            string pcdpath = SceneFolder + files[i];
+            pcl::PointCloud<PointType>::Ptr loadRawCloudKeyFrame(new pcl::PointCloud<PointType>());
+            pcl::io::loadPCDFile(pcdpath, *loadRawCloudKeyFrame);
+            if (i == 0)
+            {
+                for (int n = 0; n < loadRawCloudKeyFrame->points.size(); n++)
+                {
+                    double px = loadRawCloudKeyFrame->points[n].x;
+                    double py = loadRawCloudKeyFrame->points[n].y;
+
+                    double xInCar = py * cos(3.4 / 180 * M_PI) -
+                             px * sin(3.4 / 180 * M_PI) +
+                             0.0;
+                    double yInCar = -px * cos(3.4 / 180 * M_PI) -
+                             py * sin(3.4 / 180 * M_PI) +
+                             0.48;
+                    loadRawCloudKeyFrame->points[n].x = xInCar;
+                    loadRawCloudKeyFrame->points[n].y = yInCar;
+                }
+                *keyframeMap += *loadRawCloudKeyFrame;
+            }
+            else
+            {
+                // transformToFirst
+                double diffX = scManager.fusionRecord_load[i].pose.position.x -
+                                scManager.fusionRecord_load[0].pose.position.x;
+                double diffY = scManager.fusionRecord_load[i].pose.position.y -
+                                scManager.fusionRecord_load[0].pose.position.y;
+                // double deltaX = diffX * sin(initHeading) - diffY * cos(initHeading);
+                // double deltaY = diffX * cos(initHeading) + diffY * sin(initHeading);
+                double deltaX = diffX * cos(initHeading) + diffY * sin(initHeading);
+                double deltaY = -diffX * sin(initHeading) + diffY * cos(initHeading);
+
+                double roll_gps, pitch_gps, yaw_gps;
+                quat2euler(scManager.fusionRecord_load[i].pose.orientation, roll_gps, pitch_gps, yaw_gps);
+                // std::cout << i+1 << "th loaded frame's Heading: " << yaw_gps << std::endl;
+                double diffHeading = yaw_gps - initHeading;
+
+                for (int n = 0; n < loadRawCloudKeyFrame->points.size(); n++)
+                {
+                    double xInCar = loadRawCloudKeyFrame->points[n].y * cos(3.4 / 180 * M_PI) -
+                             loadRawCloudKeyFrame->points[n].x * sin(3.4 / 180 * M_PI) +
+                             0.0;
+                    double yInCar = -loadRawCloudKeyFrame->points[n].x * cos(3.4 / 180 * M_PI) -
+                             loadRawCloudKeyFrame->points[n].y * sin(3.4 / 180 * M_PI) +
+                             0.48;
+                    double px = xInCar * cos(diffHeading) -
+                                yInCar * sin(diffHeading) + deltaX;
+                    double py = xInCar * sin(diffHeading) +
+                                yInCar * cos(diffHeading) + deltaY;
+                    loadRawCloudKeyFrame->points[n].x = px;
+                    loadRawCloudKeyFrame->points[n].y = py;
+                }
+                *keyframeMap += *loadRawCloudKeyFrame;
+            }
+        }
+        sensor_msgs::PointCloud2 cloudMsgTemp;
+        pcl::toROSMsg(*keyframeMap, cloudMsgTemp);
+        cloudMsgTemp.header.stamp = ros::Time::now();
+        cloudMsgTemp.header.frame_id = "/velodyne";
+        while (1)
+        {
+            pubKeyframeMap.publish(cloudMsgTemp);
+            sleep(1);
+        }
+    }
+
     void loadpremap()
     {
         {
@@ -1285,7 +1363,7 @@ public:
                 onepose.pose.orientation.z = qz;
                 onepose.pose.orientation.w = qw;
                 scManager.fusionRecord_load.push_back(onepose);
-                cout << "loading GPS-record: " << utm_e << ", " << utm_n << endl;
+                // cout << "loading GPS-record: " << utm_e << ", " << utm_n << endl;
 
                 if (utm_e == 0 && utm_n == 0)
                 {
@@ -1305,7 +1383,9 @@ public:
                     std::cout << "load " << pcdpath << std::endl;
                 }
             }
-            std::cout << "premap is processed.   start localize... " << std::endl;
+            std::cout << "premap is loaded.   start combine... " << std::endl;
+            combineKeyframeMap();
+            std::cout << "premap is combined.   start localize... " << std::endl;
             premap_processed = true;
         }
         cv.notify_one();
@@ -2443,7 +2523,7 @@ int main(int argc, char **argv)
     MO.scManager.setDescriptor(descriptor);
     // MO.getRelocalParam(initLocalizeFlag, initgenerateMap, initScene, initMapFrameNum, Threshold, Hz, getgpsPath, getgpsFailPath, getgpsDistThreshold, getDescriptor);
 
-    ros::Publisher marker_pub = nh_getparam.advertise<visualization_msgs::Marker>("visualization_marker", 10);
+    ros::Publisher pubMarker = nh_getparam.advertise<visualization_msgs::Marker>("visualization_marker", 10);
     visualization_msgs::Marker line_list1, line_list2, line_list3, line_list4, line_list5;
     std::thread visualizeMapThread(&mapOptimization::visualizeGlobalMapThread, &MO);
     if (MO.LocalizeFlag)
@@ -2544,11 +2624,11 @@ int main(int argc, char **argv)
                     line_list4.points.push_back(p2);
             }
 
-            marker_pub.publish(line_list1);
-            marker_pub.publish(line_list2);
-            marker_pub.publish(line_list3);
-            marker_pub.publish(line_list4);
-            marker_pub.publish(line_list5);
+            pubMarker.publish(line_list1);
+            pubMarker.publish(line_list2);
+            pubMarker.publish(line_list3);
+            pubMarker.publish(line_list4);
+            pubMarker.publish(line_list5);
 
             ros::spinOnce(); // check for incoming messages
             // MO.run();
