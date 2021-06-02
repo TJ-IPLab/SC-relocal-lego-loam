@@ -1015,8 +1015,56 @@ public:
 
             if (localizeResultIndex != -1)
             {
-                std::string resultpath = SceneFolder + files[localizeResultIndex];
                 pcl::PointCloud<PointType>::Ptr resultpcd(new pcl::PointCloud<PointType>());
+                // single icp
+                // std::string resultpath = SceneFolder + files[localizeResultIndex];
+                // pcl::io::loadPCDFile(resultpath, *resultpcd);
+
+                // multi-frame icp
+                pcl::PointCloud<PointType>::Ptr oneframe(new pcl::PointCloud<PointType>());
+                double initRoll, initPitch, initHeading;
+                quat2euler(scManager.fusionRecord_load[localizeResultIndex].pose.orientation, initRoll, initPitch, initHeading);
+                for (int i = localizeResultIndex - 3; i <= localizeResultIndex + 3; i++)
+                {
+                    if (i < 0 || i >= files.size())
+                        continue;
+                    oneframe->clear();
+                    std::string resultpath = SceneFolder + files[i];
+                    pcl::io::loadPCDFile(resultpath, *oneframe);
+
+                    // transformToFirst
+                    double diffX = scManager.fusionRecord_load[i].pose.position.x -
+                                    scManager.fusionRecord_load[localizeResultIndex].pose.position.x;
+                    double diffY = scManager.fusionRecord_load[i].pose.position.y -
+                                    scManager.fusionRecord_load[localizeResultIndex].pose.position.y;
+                    double deltaX = diffX * cos(initHeading) + diffY * sin(initHeading);
+                    double deltaY = -diffX * sin(initHeading) + diffY * cos(initHeading);
+
+                    double roll_gps, pitch_gps, yaw_gps;
+                    quat2euler(scManager.fusionRecord_load[i].pose.orientation, roll_gps, pitch_gps, yaw_gps);
+                    // std::cout << i+1 << "th loaded frame's Heading: " << yaw_gps << std::endl;
+                    double diffHeading = yaw_gps - initHeading;
+
+                    for (int n = 0; n < oneframe->points.size(); n++)
+                    {
+                        double xInCar = oneframe->points[n].y * cos(3.4 / 180 * M_PI) -
+                                oneframe->points[n].x * sin(3.4 / 180 * M_PI) +
+                                0.0;
+                        double yInCar = -oneframe->points[n].x * cos(3.4 / 180 * M_PI) -
+                                oneframe->points[n].y * sin(3.4 / 180 * M_PI) +
+                                0.48;
+                        double px = xInCar * cos(diffHeading) -
+                                    yInCar * sin(diffHeading) + deltaX;
+                        double py = xInCar * sin(diffHeading) +
+                                    yInCar * cos(diffHeading) + deltaY;
+                        double px2 = (0.48 - py) * cos(3.4 / 180 * M_PI) - px * sin(3.4 / 180 * M_PI);
+                        double py2 = -py * sin(3.4 / 180 * M_PI) + px * cos(3.4 / 180 * M_PI);
+                        oneframe->points[n].x = px2;
+                        oneframe->points[n].y = py2;
+                    }
+                    *resultpcd += *oneframe;
+                }
+                std::string resultpath = SceneFolder + files[localizeResultIndex];
                 pcl::io::loadPCDFile(resultpath, *resultpcd);
                 cout << "[GPS evaluation] resultpcd's path: " << resultpath << endl;
 
@@ -1068,11 +1116,16 @@ public:
                     double heading = yaw_gps;
                     relocal_x = relocal_x + x * sin(heading) + y * cos(heading);
                     relocal_y = relocal_y - x * cos(heading) + y * sin(heading);
-                    std::cout << "[GPS evaluation] The relocal fine-tune GPS: "
-                              << "\n\trelocal_x: " << relocal_x
-                              << "\n\trelocal_y: " << relocal_y
-                              << "\n\tdiff_x: " << relocal_x - scManager.utm_EN.first
-                              << "\n\tdiff_y: " << relocal_y - scManager.utm_EN.second << endl;
+                    std::cout << "[GPS evaluation] The relocal fine-tune GPS:\n\t"
+                              << "relocal_x: " << relocal_x << "\n\t"
+                              << "relocal_y: " << relocal_y << "\n\t"
+                              << "diff_x: " << relocal_x - scManager.utm_EN.first << "\n\t"
+                              << "diff_y: " << relocal_y - scManager.utm_EN.second << endl;
+                    std::ofstream evaluation;
+                    evaluation.open("/home/ubuwgb/catkin_ws/data/pre_map/evaluation.txt", std::ios::app);
+                    evaluation << std::setprecision(15) << relocal_x - scManager.utm_EN.first
+                            << " " << relocal_y - scManager.utm_EN.second << endl;
+                    evaluation.close();
                 }
                 cout << "\n\n\n";
                 for (int i = 0; i < resultpcd->points.size(); i++)
@@ -1325,15 +1378,12 @@ public:
                 *keyframeMap += *loadRawCloudKeyFrame;
             }
         }
+        pcl::io::savePCDFileASCII("/home/ubuwgb/keyframeMap.pcd", *keyframeMap);
         sensor_msgs::PointCloud2 cloudMsgTemp;
         pcl::toROSMsg(*keyframeMap, cloudMsgTemp);
         cloudMsgTemp.header.stamp = ros::Time::now();
         cloudMsgTemp.header.frame_id = "/velodyne";
-        while (1)
-        {
-            pubKeyframeMap.publish(cloudMsgTemp);
-            sleep(1);
-        }
+        pubKeyframeMap.publish(cloudMsgTemp);
     }
 
     void loadpremap()
@@ -2353,6 +2403,7 @@ public:
         thisPose3D.z = latestEstimate.translation().x();
         thisPose3D.intensity = cloudKeyPoses3D->points.size(); // this can be used as index
         cloudKeyPoses3D->push_back(thisPose3D);
+        cout << "cloudKeyPoses3D->points.size(): " << cloudKeyPoses3D->points.size() << endl;
 
         thisPose6D.x = thisPose3D.x;
         thisPose6D.y = thisPose3D.y;
@@ -2517,7 +2568,7 @@ int main(int argc, char **argv)
     nh_getparam.getParam("descriptor", descriptor);
 
     MO.SceneFolder = getenv("HOME");
-    MO.SceneFolder += "/catkin_ws/data/pre_map/" + MO.Scene + "/";
+    MO.SceneFolder += "/catkin_ws/data/pre_map/" + MO.Scene + "/keyframe/";
     MO.scManager.setThres(Threshold);
     MO.scManager.setgpsFailPath(gpsFailPath);
     MO.scManager.setDescriptor(descriptor);

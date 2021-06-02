@@ -1,9 +1,12 @@
 <launch>
     
+    <!--- Run Rviz-->
+    <node pkg="rviz" type="rviz" name="rviz" args="-d $(find sc_lego_loam)/launch/slam.rviz" />
+    <node pkg="rviz" type="rviz" name="rviz" args="-d $(find sc_lego_loam)/launch/relocal.rviz" />
     <!--- Sim Time -->
     <param name="/use_sim_time" value="false" />
-
-    <param name="/LocalizeFlag" value="true" />
+    <!--- Run Mode -->
+    <param name="/LocalizeFlag" value="false" />
     <param name="/generateMap" value="false" />
 
     <!--定位和建图都要改-->
@@ -23,8 +26,6 @@
 
 
 
-    <!--- Run Rviz-->
-    <node pkg="rviz" type="rviz" name="rviz" args="-d $(find sc_lego_loam)/launch/relocal.rviz" />
 
     <!--- TF -->
     <node pkg="tf" type="static_transform_publisher" name="camera_init_to_map"  args="0 0 0 1.570795   0        1.570795 /map    /camera_init 10" />
