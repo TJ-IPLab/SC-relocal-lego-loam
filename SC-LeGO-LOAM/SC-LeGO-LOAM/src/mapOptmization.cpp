@@ -1016,11 +1016,11 @@ public:
             if (localizeResultIndex != -1)
             {
                 pcl::PointCloud<PointType>::Ptr resultpcd(new pcl::PointCloud<PointType>());
-                // single icp
+                // single registration
                 // std::string resultpath = SceneFolder + files[localizeResultIndex];
                 // pcl::io::loadPCDFile(resultpath, *resultpcd);
 
-                // multi-frame icp
+                // multi-frame registration
                 pcl::PointCloud<PointType>::Ptr oneframe(new pcl::PointCloud<PointType>());
                 double initRoll, initPitch, initHeading;
                 quat2euler(scManager.fusionRecord_load[localizeResultIndex].pose.orientation, initRoll, initPitch, initHeading);
@@ -1064,13 +1064,39 @@ public:
                     }
                     *resultpcd += *oneframe;
                 }
-                std::string resultpath = SceneFolder + files[localizeResultIndex];
-                pcl::io::loadPCDFile(resultpath, *resultpcd);
-                cout << "[GPS evaluation] resultpcd's path: " << resultpath << endl;
-
-                pcl::IterativeClosestPoint<PointType, PointType> icp_relocal;
+                // std::string resultpath = SceneFolder + files[localizeResultIndex];
+                // pcl::io::loadPCDFile(resultpath, *resultpcd);
+                // cout << "[GPS evaluation] resultpcd's path: " << resultpath << endl;
                 Eigen::Affine3f relocal_tune;
                 float x, y, z, roll, pitch, yaw;
+
+                // pcl::NormalDistributionsTransform<PointType, PointType> ndt_relocal;
+                // // Setting scale dependent NDT parameters
+                // // Setting minimum transformation difference for termination condition.
+                // ndt_relocal.setTransformationEpsilon (0.01);
+                // // Setting maximum step size for More-Thuente line search.
+                // ndt_relocal.setStepSize (0.1);
+                // //Setting Resolution of NDT grid structure (VoxelGridCovariance).
+                // ndt_relocal.setResolution (1.0);
+                // // Setting max number of registration iterations.
+                // ndt_relocal.setMaximumIterations (35);
+                // // Setting point cloud to be aligned.
+                // ndt_relocal.setInputSource (thisRawCloudKeyFrame);
+                // // Setting point cloud to be aligned to.
+                // ndt_relocal.setInputTarget (resultpcd);
+                // pcl::PointCloud<PointType>::Ptr unused_result(new pcl::PointCloud<PointType>());
+                // ndt_relocal.align(*unused_result);
+                // std::cout << "[GPS evaluation] NDT fit score: " << ndt_relocal.getFitnessScore() << std::endl;
+                // if (ndt_relocal.hasConverged() == false || ndt_relocal.getFitnessScore() > historyKeyframeFitnessScore)
+                // {
+                //     std::cout << "[GPS evaluation] warning: bad NDT fit score, > " << historyKeyframeFitnessScore << std::endl;
+                // }
+                // if (ndt_relocal.hasConverged() == true)
+                // {
+                //     relocal_tune = ndt_relocal.getFinalTransformation(); // get transformation in camera frame (because points are in camera frame)
+                    
+
+                pcl::IterativeClosestPoint<PointType, PointType> icp_relocal;
                 icp_relocal.setMaxCorrespondenceDistance(100);
                 icp_relocal.setMaximumIterations(100);
                 icp_relocal.setTransformationEpsilon(1e-6);
@@ -1094,8 +1120,9 @@ public:
                 if (icp_relocal.hasConverged() == true)
                 {
                     relocal_tune = icp_relocal.getFinalTransformation(); // get transformation in camera frame (because points are in camera frame)
+
                     pcl::getTranslationAndEulerAngles(relocal_tune, x, y, z, roll, pitch, yaw);
-                    std::cout << "[GPS evaluation] The fine-tune ICP result is "
+                    std::cout << "[GPS evaluation] The fine-tune result is "
                               << "\n\tx: " << x
                               << "\n\ty: " << y
                               << "\n\tz: " << z

@@ -803,7 +803,7 @@ std::pair<int, float> SCManager::detectRelocalID( pcl::PointCloud<SCPointType> &
     cout<<"---candidateFrame---"<<endl;
     for ( int candidate_iter_idx = 0; candidate_iter_idx < NUM_CANDIDATES_FROM_TREE; candidate_iter_idx++ )
     {
-        cout<<candidate_indexes[candidate_iter_idx]<<endl;
+        cout<<candidate_indexes[candidate_iter_idx]<<", ";
         MatrixXd polarcontext_candidate = polarcontexts_[ candidate_indexes[candidate_iter_idx] ];
         std::pair<double, int> sc_dist_result = distanceBtnScanContext( curr_desc, polarcontext_candidate ); 
         
