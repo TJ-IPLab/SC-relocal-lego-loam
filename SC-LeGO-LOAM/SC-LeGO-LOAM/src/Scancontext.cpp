@@ -6,7 +6,6 @@ int currentFrameID = 0;
 int mismatchNumber = 0;
 int failNumber = 0;
 const int scale = 10;
-const  double mismatchThershold = 8.0;
 int failFlag = 1;
 int misFlag = 2;
 
@@ -818,7 +817,7 @@ std::pair<int, float> SCManager::detectRelocalID( pcl::PointCloud<SCPointType> &
             nn_idx = candidate_indexes[candidate_iter_idx];
         }
     }
-    cout<<"---candidateFrame---"<<endl;
+    cout<<"\n---candidateFrame---"<<endl;
     t_calc_dist.toc("Distance calc");
 
     // std::cout << "start detectRelocalID ... pairwise distance calculate finished" << std::endl;
@@ -876,44 +875,10 @@ std::pair<int, float> SCManager::detectRelocalID( pcl::PointCloud<SCPointType> &
         // std::cout.precision(3); 
         cout << "[Relocalize found] Nearest distance: " << min_dist << " between current pointcloud and " << nn_idx << "." << endl;
         cout << "[Relocalize found] yaw diff: " << nn_align * PC_UNIT_SECTORANGLE << " deg." << endl;
-        cout << std::setprecision(15) << "[GPS evaluation] relocal-frame GPS: " << fusionRecord_load[nn_idx].pose.position.x
-             << ", " << fusionRecord_load[nn_idx].pose.position.y << endl;
-        cout << "[GPS evaluation] current GPS: " << utm_EN.first << ", " << utm_EN.second << endl;
-        if (nn_idx <= utmRecord_load.size())
-        {
-            auto it = utmRecord_load.begin()+nn_idx;
-            if (sqrt((utm_EN.first - it->first)*(utm_EN.first - it->first)+(utm_EN.second - it->second)*(utm_EN.second - it->second)) >= 8 )
-            {
-                double mindist = 100;
-                int minIndex = 1;
-                for(auto it2 = utmRecord_load.begin(); it2 != utmRecord_load.end(); ++it2)
-                {
-                    double dist = (utm_EN.first - it2->first)*(utm_EN.first - it2->first)+(utm_EN.second - it2->second)*(utm_EN.second - it2->second);
-                    if (dist < mindist)
-                    {
-                        mindist = dist;
-                        minIndex = (it2 - utmRecord_load.begin()) + 1;
-                    }
-                }   
-                ++mismatchNumber;
-                cout<<"this frame is mismatch! ! ! ! !"<<endl;
-                std::ofstream gpsFail;
-                gpsFail.open(gpsFail_path, std::ios::app);
-                int FailFrameID = currentFrameID + 1;
-                gpsFail<<std::setprecision(15)<<utm_EN.first<<" "<<utm_EN.second<<" "<<FailFrameID<<" "<<misFlag<<" "<<minIndex<<endl;
-                gpsFail.close();
-            }
-        }
-        else
-        {
-            cout<< "Can not judge whether it is mismatched because there is no corresponding GPS information" <<endl;
-        }
-        cout << "------" << "currentFrameID: " << ++currentFrameID << "     failNumber: " << failNumber << "     mismatchNumber: "<< mismatchNumber << "------"<<endl;
     }
     else
     {
-        
-        if(min_dist < 0.7 && pointNum < 1)
+        if(min_dist < 0.7 && pointNum < 0)
         {
             loop_id = nn_idx;
             cout << "[Relocalize found] Nearest distance: " << min_dist << " between current pointcloud and " << nn_idx << "." << endl;
@@ -950,26 +915,7 @@ std::pair<int, float> SCManager::detectRelocalID( pcl::PointCloud<SCPointType> &
             std::cout.precision(3); 
             cout << "[Not Relocalize] Nearest distance: " << min_dist << "between current pointcloud and " << nn_idx << "." << endl;
             cout << "[Not Relocalize] yaw diff: " << nn_align * PC_UNIT_SECTORANGLE << " deg." << endl;
-            double mindist = 100;
-            int minIndex = 1;
-            for(auto it2 = utmRecord_load.begin(); it2 != utmRecord_load.end(); ++it2)
-            {
-                double dist = (utm_EN.first - it2->first)*(utm_EN.first - it2->first)+(utm_EN.second - it2->second)*(utm_EN.second - it2->second);
-                if (dist < mindist)
-                {
-                    mindist = dist;
-                    minIndex = (it2 - utmRecord_load.begin()) + 1;
-                }
-            }               
-            std::ofstream gpsFail;
-            gpsFail.open(gpsFail_path, std::ios::app);
-            int FailFrameID = currentFrameID + 1;
-            gpsFail<<std::setprecision(15)<<utm_EN.first<<" "<<utm_EN.second<<" "<<FailFrameID<<" "<<failFlag<<" "<<minIndex<<endl;
-            gpsFail.close();
-            cout << "------" << "currentFrameID: " << ++currentFrameID << "     failNumber: " << ++failNumber << "     mismatchNumber: "<< mismatchNumber << "------"<<endl;
         }
-        
-
     }
 
     // To do: return also nn_align (i.e., yaw diff)

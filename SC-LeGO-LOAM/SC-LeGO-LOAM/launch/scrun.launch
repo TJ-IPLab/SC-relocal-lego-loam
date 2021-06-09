@@ -11,14 +11,17 @@
 
     <!--定位和建图都要改-->
     <param name="/Scene" value="yuanqu_3.5m" />
-    <param name="/gpstxt_path" value="/home/ubuwgb/catkin_ws/data/pre_map/yuanqu_3.5m/gps_3.5m_yuanqu_map.txt" />
 
     <!--定位要改-->
     <param name="/MapFrameNum" value="315" />
-    <param name="/gpsFailPath" value="/home/ubuwgb/catkin_ws/data/pre_map/pass.txt" />
+    <param name="/evalPath" value="/home/ubuwgb/catkin_ws/data/pre_map/evaluation.txt" />
+    <param name="/gpsFailPath" value="/home/ubuwgb/catkin_ws/data/pre_map/fail.txt" />
     <param name="/descriptor" value="sci" />
     <param name="/Threshold" value="0.4" />
     <param name="/relocalHz" value="10" />
+    <param name="/mapPospath" value="/home/ubuwgb/catkin_ws/data/pre_map/yuanqu_3.5m/keyframe_pos/fusion.txt" />
+    <!-- <param name="/gtpath" value="/home/ubuwgb/catkin_ws/data/pre_map/yuanqu_3.5m/keyframe_pos/fusion.txt" /> -->
+    <param name="/gtpath" value="/home/ubuwgb/catkin_ws/data/pre_map/yuanqu_3.5m/gt/fusion.txt" />
 
     <!--建图要改-->
     <param name="/gpsDistThreshold" value="3.5" />
@@ -34,7 +37,7 @@
     <!--- LeGO-LOAM -->    
     <node pkg="sc_lego_loam" type="sc_imageProjection"    name="sc_imageProjection"    output="screen"/>
     <node pkg="sc_lego_loam" type="sc_featureAssociation" name="sc_featureAssociation" output="screen"/>
-    <node pkg="sc_lego_loam" type="sc_mapOptmization"     name="sc_mapOptmization"     output="screen"/>
+    <node pkg="sc_lego_loam" type="sc_mapOptmization"     name="sc_mapOptmization"     output="log"/>
     <node pkg="sc_lego_loam" type="sc_transformFusion"    name="sc_transformFusion"    output="screen"/>
 
 </launch>

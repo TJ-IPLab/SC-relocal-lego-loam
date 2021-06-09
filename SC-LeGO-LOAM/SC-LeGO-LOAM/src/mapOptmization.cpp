@@ -55,8 +55,10 @@
 #include "nav_msgs/Path.h"
 #include "geometry_msgs/PoseStamped.h"
 //#include "gnss_bestpose.h"
+#include "GPS2UTM.cpp"
+#include <pcl/filters/passthrough.h>
 
-int findIndex(string ori, /*string b, */string c)
+std::string findIndex(string ori, /*string b, */string c)
 {
     int index_f, index_l;
     int index_gap;
@@ -64,15 +66,15 @@ int findIndex(string ori, /*string b, */string c)
     index_f = 0;
     index_l = ori.find(c);
     index_gap = index_l - index_f;
-    return atoi((ori.substr(index_f, index_gap)).c_str());
+    return (ori.substr(index_f, index_gap)).c_str();
 }
 int cmp(string a, string b)
 {
-    int c, d;
+    double c, d;
     // c = findIndex(a, "Coin", ".bin");
     // d = findIndex(b, "Coin", ".bin");
-    c = findIndex(a, "th_keyframe");
-    d = findIndex(b, "th_keyframe");
+    c = atof(findIndex(findIndex(a, "th_keyframe"), "_").c_str());
+    d = atof(findIndex(findIndex(b, "th_keyframe"), "_").c_str());
     return  c < d;
 }
 vector<string> getFiles(string cate_dir)
@@ -119,63 +121,14 @@ vector<string> getFiles(string cate_dir)
 
 void LonLat2UTM(double longitude, double latitude, double &UTME, double &UTMN)
 {
-    double lat = latitude;
-    double lon = longitude;
-
-    double kD2R = PI / 180.0;
-    double ZoneNumber = floor((lon - 1.5) / 3.0) + 1;
-    double L0 = ZoneNumber * 3.0;
-
-    double a = 6378137.0;
-    double F = 298.257223563;
-    double f = 1 / F;
-    double b = a * (1 - f);
-    double ee = (a * a - b * b) / (a * a);
-    double e2 = (a * a - b * b) / (b * b);
-    double n = (a - b) / (a + b);
-    double n2 = (n * n);
-    double n3 = (n2 * n);
-    double n4 = (n2 * n2);
-    double n5 = (n4 * n);
-    double al = (a + b) * (1 + n2 / 4 + n4 / 64) / 2.0;
-    double bt = -3 * n / 2 + 9 * n3 / 16 - 3 * n5 / 32.0;
-    double gm = 15 * n2 / 16 - 15 * n4 / 32;
-    double dt = -35 * n3 / 48 + 105 * n5 / 256;
-    double ep = 315 * n4 / 512;
-    double B = lat * kD2R;
-    double L = lon * kD2R;
-    L0 = L0 * kD2R;
-    double l = L - L0;
-    double cl = (cos(B) * l);
-    double cl2 = (cl * cl);
-    double cl3 = (cl2 * cl);
-    double cl4 = (cl2 * cl2);
-    double cl5 = (cl4 * cl);
-    double cl6 = (cl5 * cl);
-    double cl7 = (cl6 * cl);
-    double cl8 = (cl4 * cl4);
-    double lB = al * (B + bt * sin(2 * B) + gm * sin(4 * B) + dt * sin(6 * B) + ep * sin(8 * B));
-    double t = tan(B);
-    double t2 = (t * t);
-    double t4 = (t2 * t2);
-    double t6 = (t4 * t2);
-    double Nn = a / sqrt(1 - ee * sin(B) * sin(B));
-    double yt = e2 * cos(B) * cos(B);
-    double N = lB;
-    N = N + t * Nn * cl2 / 2;
-    N = N + t * Nn * cl4 * (5 - t2 + 9 * yt + 4 * yt * yt) / 24;
-    N = N + t * Nn * cl6 * (61 - 58 * t2 + t4 + 270 * yt - 330 * t2 * yt) / 720;
-    N = N + t * Nn * cl8 * (1385 - 3111 * t2 + 543 * t4 - t6) / 40320;
-    double E = Nn * cl;
-    E = E + Nn * cl3 * (1 - t2 + yt) / 6;
-    E = E + Nn * cl5 * (5 - 18 * t2 + t4 + 14 * yt - 58 * t2 * yt) / 120;
-    E = E + Nn * cl7 * (61 - 479 * t2 + 179 * t4 - t6) / 5040;
-    E = E + 500000;
-    N = 0.9996 * N;
-    E = 0.9996 * (E - 500000.0) + 500000.0;
-
-    UTME = E;
-    UTMN = N;
+    UTM_structure result = LatLonToUTMXY(longitude, latitude);
+    UTME = result.x;
+    UTMN = result.y;
+    if (result.zone != 51)
+    {
+        perror("wrong utm zone!");
+        exit(1);
+    }
 }
 
 using namespace gtsam;
@@ -192,6 +145,7 @@ private:
     float YawDiff;
     vector<string> files;
     pcl::PointCloud<PointType>::Ptr keyframeMap;
+    int findGT_plus, findPOS_plus;
 
     NonlinearFactorGraph gtSAMgraph;
     Values initialEstimate;
@@ -214,7 +168,7 @@ private:
     ros::Publisher pubIcpKeyFrames;
     ros::Publisher pubRecentKeyFrames;
     ros::Publisher pubRegisteredCloud;
-    ros::Publisher pubRelocalCloud;
+    ros::Publisher pubRelocalTarget, pubRelocalSource, pubRelocalICP;
     ros::Publisher pubTransformCloud;
     ros::Publisher pubKeyframeMap;
 
@@ -379,7 +333,10 @@ public:
     int MapFrameNum;
     std::string SceneFolder;
     int relocalHz, relocalNum;
-    std::string gpstxt_path;
+    std::string evalPath, mapPospath, gtpath;
+    std::ofstream evaluationTxt;
+    std::vector<geometry_msgs::PoseStamped> gt_load;
+    std::vector<geometry_msgs::PoseStamped> mappos_load;
     double distThreshold;
     int save_startind;
     bool saveRelocalKeyFrame;
@@ -404,6 +361,8 @@ public:
         premap_processed = false;
         sci_localized = false;
         relocalNum = 10;
+        findGT_plus = 0;
+        findPOS_plus = 0;
 
         ISAM2Params parameters;
         parameters.relinearizeThreshold = 0.01;
@@ -414,19 +373,21 @@ public:
         pubLaserCloudSurround = nh.advertise<sensor_msgs::PointCloud2>("/laser_cloud_surround", 2);
         pubOdomAftMapped = nh.advertise<nav_msgs::Odometry>("/aft_mapped_to_init", 5);
 
-        subLaserCloudRaw = nh.subscribe<sensor_msgs::PointCloud2>(pointCloudTopic, 2, &mapOptimization::laserCloudRawHandler, this);
+        subLaserCloudRaw = nh.subscribe<sensor_msgs::PointCloud2>(pointCloudTopic, 1000, &mapOptimization::laserCloudRawHandler, this);
         subLaserCloudCornerLast = nh.subscribe<sensor_msgs::PointCloud2>("/laser_cloud_corner_last", 2, &mapOptimization::laserCloudCornerLastHandler, this);
         subLaserCloudSurfLast = nh.subscribe<sensor_msgs::PointCloud2>("/laser_cloud_surf_last", 2, &mapOptimization::laserCloudSurfLastHandler, this);
         subOutlierCloudLast = nh.subscribe<sensor_msgs::PointCloud2>("/outlier_cloud_last", 2, &mapOptimization::laserCloudOutlierLastHandler, this);
         subLaserOdometry = nh.subscribe<nav_msgs::Odometry>("/laser_odom_to_init", 5, &mapOptimization::laserOdometryHandler, this);
         subImu = nh.subscribe<sensor_msgs::Imu>(imuTopic, 50, &mapOptimization::imuHandler, this);
-        subGPS = nh.subscribe("/fusion", 1000, &mapOptimization::FusionCallback, this);
+        subGPS = nh.subscribe("/fusion", 10000, &mapOptimization::FusionCallback, this);
 
         pubHistoryKeyFrames = nh.advertise<sensor_msgs::PointCloud2>("/history_cloud", 2);
         pubIcpKeyFrames = nh.advertise<sensor_msgs::PointCloud2>("/corrected_cloud", 2);
         pubRecentKeyFrames = nh.advertise<sensor_msgs::PointCloud2>("/recent_cloud", 2);
         pubRegisteredCloud = nh.advertise<sensor_msgs::PointCloud2>("/registered_cloud", 2);
-        pubRelocalCloud = nh.advertise<sensor_msgs::PointCloud2>("/relocal_cloud", 2);
+        pubRelocalTarget = nh.advertise<sensor_msgs::PointCloud2>("/relocal_target", 2);
+        pubRelocalSource = nh.advertise<sensor_msgs::PointCloud2>("/relocal_source", 2);
+        pubRelocalICP = nh.advertise<sensor_msgs::PointCloud2>("/relocal_icp", 2);
         pubTransformCloud = nh.advertise<sensor_msgs::PointCloud2>("/transform", 2);
         pubKeyframeMap = nh.advertise<sensor_msgs::PointCloud2>("/keyframe_map", 10);
 
@@ -472,96 +433,6 @@ public:
     }
 */
 
-    void FusionCallback(const geometry_msgs::PoseStamped &gps_msg)
-    {
-        skipFusionNum = skipFusionNum + skipFusionHz;
-        if (generateMap)
-        {
-            if (pcdStillNotSave)
-                return;
-            if (skipFusionNum >= 10)
-            {
-                skipFusionNum = 0;
-                double time = gps_msg.header.stamp.toSec();
-                double latitude = gps_msg.pose.position.x;
-                double longitude = gps_msg.pose.position.y;
-                double height = gps_msg.pose.position.z;
-                double qx = gps_msg.pose.orientation.x;
-                double qy = gps_msg.pose.orientation.y;
-                double qz = gps_msg.pose.orientation.z;
-                double qw = gps_msg.pose.orientation.w;
-                LonLat2UTM(longitude, latitude, scManager.utm_EN.first, scManager.utm_EN.second);
-                // saveRelocalKeyFrame = true; //使用另一种采集策略记得取消注释
-                if (!scManager.utmRecord.empty())
-                {
-                    auto it = scManager.utmRecord.end() - 1;
-                    if (sqrt((scManager.utm_EN.first - it->first) * (scManager.utm_EN.first - it->first) + (scManager.utm_EN.second - it->second) * (scManager.utm_EN.second - it->second)) >= distThreshold)
-                    {
-                        saveRelocalKeyFrame = true;
-                        // cout << "saveRelocalKeyFrame = true | not empty" << endl;
-                        // save position information
-                        scManager.utmRecord.push_back(scManager.utm_EN);
-
-                        // write position to txtfile
-                        std::ofstream gpsOut;
-                        gpsOut.open(gpstxt_path, std::ios::app);
-                        gpsOut << setprecision(15) << scManager.utm_EN.first << " " << scManager.utm_EN.second
-                                << " " << height << " " << qx << " " << qy << " " << qz << " " << qw << " " << time << endl;
-                        pcdStillNotSave = true;
-                        gpsOut.close();
-                    }
-
-                //  补充建图:
-                //  1.改回调函数
-                //  2.改输入GPS.txt
-                //  3.改开始的帧数序号  
-                
-                // for (auto it = scManager.utmRecord.cbegin(); it != scManager.utmRecord.cend(); ++it)
-                // {
-                //     if (sqrt((scManager.utm_EN.first - it->first)*(scManager.utm_EN.first - it->first)+(scManager.utm_EN.second - it->second)*(scManager.utm_EN.second - it->second)) <= distThreshold )
-                //     {
-                //         saveRelocalKeyFrame = false;
-                //         break;
-                //     }
-                // }
-                // if (saveRelocalKeyFrame)
-                // {
-                //     scManager.utmRecord.push_back(scManager.utm_EN);
-                //     std::ofstream gpsOut;
-                //     gpsOut.open(gpstxt_path, std::ios::app);
-                //     gpsOut << setprecision(15) << scManager.utm_EN.first << " " << scManager.utm_EN.second
-                //            << " " << height << " " << qx << " " << qy << " " << qz << " " << qw << " " << time << endl;
-                //     pcdStillNotSave = true;
-                //     gpsOut.close();
-                // }
-                
-                }
-
-                else
-                {
-                    saveRelocalKeyFrame = true;
-                    // cout << "saveRelocalKeyFrame = true | is empty" << endl;
-                    scManager.utmRecord.push_back(scManager.utm_EN);
-                    std::ofstream gpsOut;
-                    gpsOut.open(gpstxt_path, std::ios::app);
-                    gpsOut << setprecision(15) << scManager.utm_EN.first << " " << scManager.utm_EN.second
-                           << " " << height << " " << qx << " " << qy << " " << qz << " " << qw << " " << time << endl;
-                    gpsOut.close();
-                }
-            }
-        }
-        else
-        {
-            if (skipFusionNum >= 10)
-            {
-                skipFusionNum = 0;
-                double latitude = gps_msg.pose.position.x;
-                double longitude = gps_msg.pose.position.y;
-                LonLat2UTM(longitude, latitude, scManager.utm_EN.first, scManager.utm_EN.second);
-            }
-        }
-    }
-
     // void getRelocalParam(bool initLocalizeFlag, bool initgenerateMap, string initScene,
     //                      int initMapFrameNum, double Threshold, int Hz, std::string gpsPath,
     //                      std::string gpsFailPath, double gpsDistThreshold,
@@ -579,16 +450,16 @@ public:
     //     relocalHz = Hz;
     //     gpstxt_path = gpsPath;
     //     distThreshold = gpsDistThreshold;
-    //     std::cout << "LocalizeFlag: " << LocalizeFlag << std::endl;
-    //     std::cout << "Scene: " << Scene << std::endl;
-    //     std::cout << "MapFrameNum: " << MapFrameNum << std::endl;
-    //     std::cout << "SceneFolder: " << SceneFolder << std::endl;
-    //     std::cout << "Threshold: " << Threshold << std::endl;
-    //     std::cout << "relocalHz: " << relocalHz << std::endl;
-    //     std::cout << "distThreshold: " << distThreshold << std::endl;
-    //     std::cout << "gpstxt_path: " << gpstxt_path << std::endl;
-    //     std::cout << "gpsFailPath: " << gpsFailPath << std::endl;
-    //     std::cout << "descriptor: " << descriptor << std::endl;
+    //     cout << "LocalizeFlag: " << LocalizeFlag << endl;
+    //     cout << "Scene: " << Scene << endl;
+    //     cout << "MapFrameNum: " << MapFrameNum << endl;
+    //     cout << "SceneFolder: " << SceneFolder << endl;
+    //     cout << "Threshold: " << Threshold << endl;
+    //     cout << "relocalHz: " << relocalHz << endl;
+    //     cout << "distThreshold: " << distThreshold << endl;
+    //     cout << "gpstxt_path: " << gpstxt_path << endl;
+    //     cout << "gpsFailPath: " << gpsFailPath << endl;
+    //     cout << "descriptor: " << descriptor << endl;
     // }
 
     void allocateMemory()
@@ -960,251 +831,6 @@ public:
         yaw = -atan2(C12, C22);
     }
 
-    void laserCloudRawHandler(const sensor_msgs::PointCloud2ConstPtr &msg)
-    {
-        if (!LocalizeFlag)
-            return;
-        // cout << "handler: enter LocalizeFlag segment" << endl;
-        laserCloudRawTime = msg->header.stamp.toSec();
-        laserCloudRaw->clear();
-        pcl::fromROSMsg(*msg, *laserCloudRaw);
-        laserCloudRawDS->clear();
-        downSizeFilterScancontext.setInputCloud(laserCloudRaw);
-        downSizeFilterScancontext.filter(*laserCloudRawDS);
-        if (generateMap)
-        {
-            // cout << "handler: enter generateMap segment" << endl;
-            if (saveRelocalKeyFrame)
-            {
-                std::string rawDS_path = SceneFolder;
-                rawDS_path += to_string(laserCloudRawTime) + '_';
-                rawDS_path += to_string(save_startind) + "th_keyframe" +  + ".pcd";
-                cout << "handler: enter saveRelocalKeyFrame segment and save pcd at: ";
-                cout << rawDS_path << endl;
-                pcl::io::savePCDFileASCII(rawDS_path, *laserCloudRawDS);
-                save_startind++;
-                pcdStillNotSave = false;
-                saveRelocalKeyFrame = false;
-            }
-            return;
-        }
-        pcl::PointCloud<PointType>::Ptr thisRawCloudKeyFrame(new pcl::PointCloud<PointType>());
-        pcl::copyPointCloud(*laserCloudRawDS, *thisRawCloudKeyFrame);
-        relocalNum = relocalNum + relocalHz;
-        if (relocalNum >= 10)
-        {
-            relocalNum = 0;
-            std::unique_lock<std::mutex> unilock(mtx_cv);
-            cv.wait(unilock, [&] { return premap_processed; });
-            std::cout << "start detectRelocalID ..." << std::endl;
-            auto localizeResult = scManager.detectRelocalID(*thisRawCloudKeyFrame);
-            sci_localized = true;
-            localizeResultIndex = localizeResult.first;
-            YawDiff = localizeResult.second;
-            std::cout << "------ localizeResult.Index: " << localizeResultIndex;
-            std::cout << "------ localizeResult.YawDiff: " << YawDiff << std::endl;
-            unilock.unlock();
-
-            // ++relocalSaveInd;
-
-            // std::string relocalPcdPath = getenv("HOME");
-            // relocalPcdPath += "/catkin_ws/data/localizeFrame/";
-            // relocalPcdPath += to_string(relocalSaveInd) + "th_keyframe_";
-            // relocalPcdPath += to_string(laserCloudRawTime) + ".pcd";
-            // pcl::io::savePCDFileASCII(relocalPcdPath, *thisRawCloudKeyFrame);
-
-            if (localizeResultIndex != -1)
-            {
-                pcl::PointCloud<PointType>::Ptr resultpcd(new pcl::PointCloud<PointType>());
-                // single registration
-                // std::string resultpath = SceneFolder + files[localizeResultIndex];
-                // pcl::io::loadPCDFile(resultpath, *resultpcd);
-
-                // multi-frame registration
-                pcl::PointCloud<PointType>::Ptr oneframe(new pcl::PointCloud<PointType>());
-                double initRoll, initPitch, initHeading;
-                quat2euler(scManager.fusionRecord_load[localizeResultIndex].pose.orientation, initRoll, initPitch, initHeading);
-                for (int i = localizeResultIndex - 3; i <= localizeResultIndex + 3; i++)
-                {
-                    if (i < 0 || i >= files.size())
-                        continue;
-                    oneframe->clear();
-                    std::string resultpath = SceneFolder + files[i];
-                    pcl::io::loadPCDFile(resultpath, *oneframe);
-
-                    // transformToFirst
-                    double diffX = scManager.fusionRecord_load[i].pose.position.x -
-                                    scManager.fusionRecord_load[localizeResultIndex].pose.position.x;
-                    double diffY = scManager.fusionRecord_load[i].pose.position.y -
-                                    scManager.fusionRecord_load[localizeResultIndex].pose.position.y;
-                    double deltaX = diffX * cos(initHeading) + diffY * sin(initHeading);
-                    double deltaY = -diffX * sin(initHeading) + diffY * cos(initHeading);
-
-                    double roll_gps, pitch_gps, yaw_gps;
-                    quat2euler(scManager.fusionRecord_load[i].pose.orientation, roll_gps, pitch_gps, yaw_gps);
-                    // std::cout << i+1 << "th loaded frame's Heading: " << yaw_gps << std::endl;
-                    double diffHeading = yaw_gps - initHeading;
-
-                    for (int n = 0; n < oneframe->points.size(); n++)
-                    {
-                        double xInCar = oneframe->points[n].y * cos(3.4 / 180 * M_PI) -
-                                oneframe->points[n].x * sin(3.4 / 180 * M_PI) +
-                                0.0;
-                        double yInCar = -oneframe->points[n].x * cos(3.4 / 180 * M_PI) -
-                                oneframe->points[n].y * sin(3.4 / 180 * M_PI) +
-                                0.48;
-                        double px = xInCar * cos(diffHeading) -
-                                    yInCar * sin(diffHeading) + deltaX;
-                        double py = xInCar * sin(diffHeading) +
-                                    yInCar * cos(diffHeading) + deltaY;
-                        double px2 = (0.48 - py) * cos(3.4 / 180 * M_PI) - px * sin(3.4 / 180 * M_PI);
-                        double py2 = -py * sin(3.4 / 180 * M_PI) + px * cos(3.4 / 180 * M_PI);
-                        oneframe->points[n].x = px2;
-                        oneframe->points[n].y = py2;
-                    }
-                    *resultpcd += *oneframe;
-                }
-                // std::string resultpath = SceneFolder + files[localizeResultIndex];
-                // pcl::io::loadPCDFile(resultpath, *resultpcd);
-                // cout << "[GPS evaluation] resultpcd's path: " << resultpath << endl;
-                Eigen::Affine3f relocal_tune;
-                float x, y, z, roll, pitch, yaw;
-
-                // pcl::NormalDistributionsTransform<PointType, PointType> ndt_relocal;
-                // // Setting scale dependent NDT parameters
-                // // Setting minimum transformation difference for termination condition.
-                // ndt_relocal.setTransformationEpsilon (0.01);
-                // // Setting maximum step size for More-Thuente line search.
-                // ndt_relocal.setStepSize (0.1);
-                // //Setting Resolution of NDT grid structure (VoxelGridCovariance).
-                // ndt_relocal.setResolution (1.0);
-                // // Setting max number of registration iterations.
-                // ndt_relocal.setMaximumIterations (35);
-                // // Setting point cloud to be aligned.
-                // ndt_relocal.setInputSource (thisRawCloudKeyFrame);
-                // // Setting point cloud to be aligned to.
-                // ndt_relocal.setInputTarget (resultpcd);
-                // pcl::PointCloud<PointType>::Ptr unused_result(new pcl::PointCloud<PointType>());
-                // ndt_relocal.align(*unused_result);
-                // std::cout << "[GPS evaluation] NDT fit score: " << ndt_relocal.getFitnessScore() << std::endl;
-                // if (ndt_relocal.hasConverged() == false || ndt_relocal.getFitnessScore() > historyKeyframeFitnessScore)
-                // {
-                //     std::cout << "[GPS evaluation] warning: bad NDT fit score, > " << historyKeyframeFitnessScore << std::endl;
-                // }
-                // if (ndt_relocal.hasConverged() == true)
-                // {
-                //     relocal_tune = ndt_relocal.getFinalTransformation(); // get transformation in camera frame (because points are in camera frame)
-                    
-
-                pcl::IterativeClosestPoint<PointType, PointType> icp_relocal;
-                icp_relocal.setMaxCorrespondenceDistance(100);
-                icp_relocal.setMaximumIterations(100);
-                icp_relocal.setTransformationEpsilon(1e-6);
-                icp_relocal.setEuclideanFitnessEpsilon(1e-6);
-                icp_relocal.setRANSACIterations(0);
-
-                // Align clouds
-                // Eigen::Affine3f icpInitialMatFoo = pcl::getTransformation(0, 0, 0, yawDiffRad, 0, 0); // because within cam coord: (z, x, y, yaw, roll, pitch)
-                // Eigen::Matrix4f icpInitialMat = icpInitialMatFoo.matrix();
-                icp_relocal.setInputSource(thisRawCloudKeyFrame);
-                icp_relocal.setInputTarget(resultpcd);
-                pcl::PointCloud<PointType>::Ptr unused_result(new pcl::PointCloud<PointType>());
-                icp_relocal.align(*unused_result);
-                // icp_relocal.align(*unused_result, icpInitialMat); // PCL icp non-eye initial is bad ... don't use (LeGO LOAM author also said pcl transform is weird.)
-
-                std::cout << "[GPS evaluation] ICP fit score: " << icp_relocal.getFitnessScore() << std::endl;
-                if (icp_relocal.hasConverged() == false || icp_relocal.getFitnessScore() > historyKeyframeFitnessScore)
-                {
-                    std::cout << "[GPS evaluation] warning: bad icp fit score, > " << historyKeyframeFitnessScore << std::endl;
-                }
-                if (icp_relocal.hasConverged() == true)
-                {
-                    relocal_tune = icp_relocal.getFinalTransformation(); // get transformation in camera frame (because points are in camera frame)
-
-                    pcl::getTranslationAndEulerAngles(relocal_tune, x, y, z, roll, pitch, yaw);
-                    std::cout << "[GPS evaluation] The fine-tune result is "
-                              << "\n\tx: " << x
-                              << "\n\ty: " << y
-                              << "\n\tz: " << z
-                              << "\n\troll: " << roll
-                              << "\n\tyaw: " << yaw
-                              << "\n\tpitch: " << pitch << std::endl;
-                    // tf::Quaternion quat;
-                    // tf::quaternionMsgToTF(scManager.fusionRecord_load[localizeResultIndex].pose.orientation, quat);
-                    double roll_gps, pitch_gps, yaw_gps;
-                    // tf::Matrix3x3(quat).getRPY(roll_gps, pitch_gps, yaw_gps);
-                    quat2euler(scManager.fusionRecord_load[localizeResultIndex].pose.orientation, roll_gps, pitch_gps, yaw_gps);
-                    std::cout << "[GPS evaluation] The detected relocal frame's rpy is "
-                              << "\nroll: " << roll_gps
-                              << "\nyaw: " << pitch_gps
-                              << "\npitch: " << yaw_gps << std::endl;
-                    double relocal_x = scManager.fusionRecord_load[localizeResultIndex].pose.position.x;
-                    double relocal_y = scManager.fusionRecord_load[localizeResultIndex].pose.position.y;
-                    double heading = yaw_gps;
-                    relocal_x = relocal_x + x * sin(heading) + y * cos(heading);
-                    relocal_y = relocal_y - x * cos(heading) + y * sin(heading);
-                    std::cout << "[GPS evaluation] The relocal fine-tune GPS:\n\t"
-                              << "relocal_x: " << relocal_x << "\n\t"
-                              << "relocal_y: " << relocal_y << "\n\t"
-                              << "diff_x: " << relocal_x - scManager.utm_EN.first << "\n\t"
-                              << "diff_y: " << relocal_y - scManager.utm_EN.second << endl;
-                    std::ofstream evaluation;
-                    evaluation.open("/home/ubuwgb/catkin_ws/data/pre_map/evaluation.txt", std::ios::app);
-                    evaluation << std::setprecision(15) << relocal_x - scManager.utm_EN.first
-                            << " " << relocal_y - scManager.utm_EN.second << endl;
-                    evaluation.close();
-                }
-                cout << "\n\n\n";
-                for (int i = 0; i < resultpcd->points.size(); i++)
-                {
-                    auto x = resultpcd->points[i].x * cos(YawDiff) - resultpcd->points[i].y * sin(YawDiff);
-                    auto y = resultpcd->points[i].x * sin(YawDiff) + resultpcd->points[i].y * cos(YawDiff);
-                    resultpcd->points[i].x = x;
-                    resultpcd->points[i].y = y;
-                    resultpcd->points[i].z += 20;
-                }
-
-                sensor_msgs::PointCloud2 cloudMsgTemp;
-                pcl::toROSMsg(*resultpcd, cloudMsgTemp);
-                cloudMsgTemp.header.stamp = ros::Time().fromSec(laserCloudRawTime);
-                cloudMsgTemp.header.frame_id = "/velodyne";
-                pubRelocalCloud.publish(cloudMsgTemp);
-
-                /**
-----------------------------------------transform------------------------------------------------------
-                for (int trans = 0; trans < 21; ++trans)
-                {
-                    pcl::PointCloud<PointType>::Ptr copy(new pcl::PointCloud<PointType>());
-                    pcl::copyPointCloud(*resultpcd,  *copy);
-                for (int i = 0; i < copy->points.size(); i++)
-                {
-                    copy->points[i].y -= trans;
-                    copy->points[i].z -= 20;
-                }
-
-                sensor_msgs::PointCloud2 transformCloud;
-                pcl::toROSMsg(*copy, transformCloud);
-                transformCloud.header.stamp = ros::Time().fromSec(laserCloudRawTime);
-                transformCloud.header.frame_id = "/velodyne";
-                pubTransformCloud.publish(transformCloud);
-
-                Eigen::MatrixXd sc = forTransform.makeScancontext(*copy);
-                cv::Mat sciForRedPoint = forTransform.createSci(sc);
-                char name[100];
-                sprintf(name,"transformPoint_y+%d",trans);
-                cv::Mat sciForRedPointAddAxes = forTransform.addAxes(sciForRedPoint,name);
-                cv::imshow("transform point",sciForRedPointAddAxes);
-                cv::waitKey(1);
-                sleep(1);
-               
-                }
-----------------------------------------transform------------------------------------------------------
-**/
-            }
-            // cv.notify_one();
-        }
-    }
-
     void laserCloudCornerLastHandler(const sensor_msgs::PointCloud2ConstPtr &msg)
     {
         timeLaserCloudCornerLast = msg->header.stamp.toSec();
@@ -1328,32 +954,72 @@ public:
         }
     }
 
+    void FusionCallback(const geometry_msgs::PoseStamped &gps_msg)
+    {
+        skipFusionNum = skipFusionNum + skipFusionHz;
+        if (generateMap)
+        {
+            if (pcdStillNotSave)
+                return;
+            if (skipFusionNum >= 10)
+            {
+                skipFusionNum = 0;
+                double time = gps_msg.header.stamp.toSec();
+                double latitude = gps_msg.pose.position.x;
+                double longitude = gps_msg.pose.position.y;
+                double height = gps_msg.pose.position.z;
+                double qx = gps_msg.pose.orientation.x;
+                double qy = gps_msg.pose.orientation.y;
+                double qz = gps_msg.pose.orientation.z;
+                double qw = gps_msg.pose.orientation.w;
+                LonLat2UTM(longitude, latitude, scManager.utm_EN.first, scManager.utm_EN.second);
+                // saveRelocalKeyFrame = true; //使用另一种采集策略记得取消注释
+                if (scManager.utmRecord.empty())
+                {
+                    saveRelocalKeyFrame = true;
+                    // cout << "saveRelocalKeyFrame = true | is empty" << endl;
+                    scManager.utmRecord.push_back(scManager.utm_EN);
+                    pcdStillNotSave = true;
+                }
+                else
+                {
+                    auto it = scManager.utmRecord.end() - 1;
+                    if (sqrt((scManager.utm_EN.first - it->first) * (scManager.utm_EN.first - it->first) + (scManager.utm_EN.second - it->second) * (scManager.utm_EN.second - it->second)) >= distThreshold)
+                    {
+                        saveRelocalKeyFrame = true;
+                        // cout << "saveRelocalKeyFrame = true | not empty" << endl;
+                        // save position information
+                        scManager.utmRecord.push_back(scManager.utm_EN);
+                        pcdStillNotSave = true;
+                    }
+                }
+            }
+        }
+    }
+
     void RelocalThread()
     {
         loadpremap();
-        // while (true){
-        //     if (initLocalize()){
-        //         std::cout << "initLocalize success !!!" << std::endl;
-        //         sci_localized = false;
-        //     }
-        //     // else
-        //     //     std::cout << "initLocalize failed. try again." << std::endl;
-        // }
     }
 
     void combineKeyframeMap()
     {
         keyframeMap->clear();
         double initRoll, initPitch, initHeading;
-        quat2euler(scManager.fusionRecord_load[0].pose.orientation, initRoll, initPitch, initHeading);
-        std::cout << "1th loaded frame's initHeading: " << initHeading << std::endl;
+        int initIndex;
         for (int i = 0; i < MapFrameNum; i++)
         {
             string pcdpath = SceneFolder + files[i];
             pcl::PointCloud<PointType>::Ptr loadRawCloudKeyFrame(new pcl::PointCloud<PointType>());
             pcl::io::loadPCDFile(pcdpath, *loadRawCloudKeyFrame);
+            std::string curMapName = files[i];
+            double curMapTime = atof(findIndex(findIndex(curMapName, "th_keyframe"), "_").c_str());
+            int posindex = find_mappos(curMapTime);
             if (i == 0)
             {
+                initIndex = posindex;
+                quat2euler(mappos_load[posindex].pose.orientation, initRoll, initPitch, initHeading);
+                cout << "1th loaded frame's initHeading: " << initHeading << endl;
                 for (int n = 0; n < loadRawCloudKeyFrame->points.size(); n++)
                 {
                     double px = loadRawCloudKeyFrame->points[n].x;
@@ -1373,18 +1039,18 @@ public:
             else
             {
                 // transformToFirst
-                double diffX = scManager.fusionRecord_load[i].pose.position.x -
-                                scManager.fusionRecord_load[0].pose.position.x;
-                double diffY = scManager.fusionRecord_load[i].pose.position.y -
-                                scManager.fusionRecord_load[0].pose.position.y;
+                double diffX = mappos_load[posindex].pose.position.x -
+                                mappos_load[initIndex].pose.position.x;
+                double diffY = mappos_load[posindex].pose.position.y -
+                                mappos_load[initIndex].pose.position.y;
                 // double deltaX = diffX * sin(initHeading) - diffY * cos(initHeading);
                 // double deltaY = diffX * cos(initHeading) + diffY * sin(initHeading);
                 double deltaX = diffX * cos(initHeading) + diffY * sin(initHeading);
                 double deltaY = -diffX * sin(initHeading) + diffY * cos(initHeading);
 
                 double roll_gps, pitch_gps, yaw_gps;
-                quat2euler(scManager.fusionRecord_load[i].pose.orientation, roll_gps, pitch_gps, yaw_gps);
-                // std::cout << i+1 << "th loaded frame's Heading: " << yaw_gps << std::endl;
+                quat2euler(mappos_load[posindex].pose.orientation, roll_gps, pitch_gps, yaw_gps);
+                // cout << i+1 << "th loaded frame's Heading: " << yaw_gps << endl;
                 double diffHeading = yaw_gps - initHeading;
 
                 for (int n = 0; n < loadRawCloudKeyFrame->points.size(); n++)
@@ -1418,66 +1084,543 @@ public:
         {
             std::lock_guard<std::mutex> lock_1(mtx_cv);
             files = getFiles(SceneFolder);
-            std::string pcdpath;
-            std::cout << "loading... please wait" << pcdpath << std::endl;
-
-            FILE *gpsIn;
-            double time, utm_e, utm_n, height, qx, qy, qz, qw;
-            geometry_msgs::PoseStamped onepose;
-            gpsIn = fopen(gpstxt_path.c_str(), "r");
             for (int i = 0; i < MapFrameNum; i++)
             {
-                fscanf(gpsIn, "%lf %lf %lf %lf %lf %lf %lf %lf\n", &utm_e, &utm_n, &height, &qx, &qy, &qz, &qw, &time);
-                scManager.utm_EN_load.first = utm_e;
-                scManager.utm_EN_load.second = utm_n;
-                scManager.utmRecord_load.push_back(scManager.utm_EN_load);
-                onepose.header.seq = i;
-                onepose.pose.position.x = utm_e;
-                onepose.pose.position.y = utm_n;
-                onepose.pose.position.z = height;
-                onepose.pose.orientation.x = qx;
-                onepose.pose.orientation.y = qy;
-                onepose.pose.orientation.z = qz;
-                onepose.pose.orientation.w = qw;
-                scManager.fusionRecord_load.push_back(onepose);
-                // cout << "loading GPS-record: " << utm_e << ", " << utm_n << endl;
-
-                if (utm_e == 0 && utm_n == 0)
-                {
-                    cout << "ERROR: load-GPS is oversize!" << endl;
-                }
+                cout << files[i] << " " << atof(findIndex(findIndex(files[i], "th_keyframe"), "_").c_str()) << endl;
             }
+            std::string pcdpath;
+            cout << "loading... please wait" << pcdpath << endl;
+
+            double time, height, qx, qy, qz, qw, lat, lon;
 
             for (int i = 0; i < MapFrameNum; i++)
             {
                 pcdpath = SceneFolder + files[i];
                 pcl::PointCloud<PointType>::Ptr loadRawCloudKeyFrame(new pcl::PointCloud<PointType>());
                 pcl::io::loadPCDFile(pcdpath, *loadRawCloudKeyFrame);
-                // std::cout << "load " << pcdpath << std::endl;
+                // cout << "load " << pcdpath << endl;
                 scManager.makeAndSaveScancontextAndKeys(*loadRawCloudKeyFrame);
                 if (i % 50 == 0)
                 {
-                    std::cout << "load " << pcdpath << std::endl;
+                    cout << "load " << pcdpath << endl;
                 }
             }
-            std::cout << "premap is loaded.   start combine... " << std::endl;
+            std::ifstream loadMapPos;
+            loadMapPos.open(mapPospath.c_str());
+            // cout << "loadMapPos.eof(): " << loadMapPos.eof() << endl;
+            // cout << "loadMapPos.good(): " << loadMapPos.good() << endl;
+            while (!loadMapPos.eof() && loadMapPos.good())
+            {
+                geometry_msgs::PoseStamped mappos;
+                char buf[1000];
+                loadMapPos.getline(buf, 1000);
+                sscanf(buf, "%lf %lf %lf %lf %lf %lf %lf %lf\n", &time, &lat, &lon, &height, &qx, &qy, &qz, &qw);
+                mappos.header.stamp.fromSec(time);
+                // cout << "loading time: " << mappos.header.stamp.toSec() << endl;
+
+                LonLat2UTM(lon, lat, mappos.pose.position.x, mappos.pose.position.y);
+                // mappos.pose.position.x = lat;
+                // mappos.pose.position.y = lon;
+                mappos.pose.position.z = height;
+                mappos.pose.orientation.x = qx;
+                mappos.pose.orientation.y = qy;
+                mappos.pose.orientation.z = qz;
+                mappos.pose.orientation.w = qw;
+                mappos_load.emplace_back(mappos);
+            }
+            loadMapPos.close();
+            cout << MapFrameNum << " premap with "
+                      << mappos_load.size() << " position is loaded.   start combine... " << endl;
+
             combineKeyframeMap();
-            std::cout << "premap is combined.   start localize... " << std::endl;
+            cout << "premap is combined.   start load ground truth... " << endl;
+            
+            std::ifstream loadgt;
+            loadgt.open(gtpath.c_str());
+            while (!loadgt.eof() && loadgt.good())
+            {
+                geometry_msgs::PoseStamped gtpose;
+                char buf[1000];
+                loadgt.getline(buf, 1000);
+                sscanf(buf, "%lf %lf %lf %lf %lf %lf %lf %lf\n", &time, &lat, &lon, &height, &qx, &qy, &qz, &qw);
+                gtpose.header.stamp.fromSec(time);
+                // cout << "loading time: " << gtpose.header.stamp.toSec() << endl;
+                gtpose.pose.position.x = lat;
+                gtpose.pose.position.y = lon;
+                gtpose.pose.position.z = height;
+                gtpose.pose.orientation.x = qx;
+                gtpose.pose.orientation.y = qy;
+                gtpose.pose.orientation.z = qz;
+                gtpose.pose.orientation.w = qw;
+                gt_load.emplace_back(gtpose);
+            }
+            loadgt.close();
+            cout << gt_load.size() << " ground truth is loaded.   start localize... " << endl;
             premap_processed = true;
         }
         cv.notify_one();
     }
 
-    bool initLocalize()
+    int find_mappos(double frametime, bool find_neighbor = false)
     {
+        if (!findPOS_plus)
         {
-            std::unique_lock<std::mutex> lock_2(mtx_cv);
-            cv.wait(lock_2, [&] { return sci_localized; });
+            for (int i = 0; i < mappos_load.size() - 1; i++)
+            {
+                if (abs(mappos_load[i].header.stamp.toSec() - frametime) < abs(mappos_load[i + 1].header.stamp.toSec() - frametime))
+                {
+                    // cout << i << "th diff0!: \t" << abs(mappos_load[i].header.stamp.toSec() - frametime) << endl;
+                    // cout << i + 1 << "th diff0!: \t" << abs(mappos_load[i + 1].header.stamp.toSec() - frametime) << endl;
+                    findPOS_plus = i;
+                    break;
+                }
+            }
         }
-        if (localizeResultIndex != -1)
-            return true;
+        else if (find_neighbor)
+        {
+            // for (int i = (findPOS_plus - 300 >= 0 ? findPOS_plus - 300 : 0); i < mappos_load.size() - 1; i++)
+            for (int i = 0; i < mappos_load.size() - 1; i++)
+            {
+                if (abs(mappos_load[i].header.stamp.toSec() - frametime) < abs(mappos_load[i + 1].header.stamp.toSec() - frametime))
+                {
+                    // cout << i << "th diff0!: \t" << abs(mappos_load[i].header.stamp.toSec() - frametime) << endl;
+                    // cout << i + 1 << "th diff0!: \t" << abs(mappos_load[i + 1].header.stamp.toSec() - frametime) << endl;
+                    return i;
+                }
+            }
+        }
         else
-            return false;
+        {
+            for (int i = 0; i < mappos_load.size() - 1; i++)
+            {
+                if (abs(mappos_load[i].header.stamp.toSec() - frametime) < abs(mappos_load[i + 1].header.stamp.toSec() - frametime))
+                {
+                    // cout << i << "th diff: \t" << abs(mappos_load[i].header.stamp.toSec() - frametime) << endl;
+                    // cout << i + 1 << "th diff: \t" << abs(mappos_load[i + 1].header.stamp.toSec() - frametime) << endl;
+                    findPOS_plus = i;
+                    break;
+                }
+            }
+        }
+
+        if (abs(mappos_load[findPOS_plus].header.stamp.toSec() - frametime) > 0.02)
+        {
+            cout << "[find_mappos] warning: frametime: \t" << frametime << endl;
+            cout << "[find_mappos] warning: postime: \t" << mappos_load[findPOS_plus].header.stamp.toSec() << endl;
+            perror("[find_mappos] time diff too large");
+            // exit(1);
+        }
+        return findPOS_plus;
+    }
+
+    void find_gt(double pctime, double &gt_x, double &gt_y)
+    {
+        if (!findGT_plus)
+        {
+            for (int i = 0; i < gt_load.size() - 1; i++)
+            {
+                if (abs(gt_load[i].header.stamp.toSec() - pctime) < abs(gt_load[i + 1].header.stamp.toSec() - pctime))
+                {
+                    // cout << i << "th diff0!: \t" << abs(gt_load[i].header.stamp.toSec() - pctime) << endl;
+                    // cout << i + 1 << "th diff0!: \t" << abs(gt_load[i + 1].header.stamp.toSec() - pctime) << endl;
+                    findGT_plus = i;
+                    break;
+                }
+            }
+        }
+        else
+        {
+            for (int i = findGT_plus; i < gt_load.size() - 1; i++)
+            {
+                if (abs(gt_load[i].header.stamp.toSec() - pctime) < abs(gt_load[i + 1].header.stamp.toSec() - pctime))
+                {
+                    // cout << i << "th diff: \t" << abs(gt_load[i].header.stamp.toSec() - pctime) << endl;
+                    // cout << i + 1 << "th diff: \t" << abs(gt_load[i + 1].header.stamp.toSec() - pctime) << endl;
+                    findGT_plus = i;
+                    break;
+                }
+            }
+        }
+        geometry_msgs::PoseStamped gtpose = gt_load[findGT_plus];
+        LonLat2UTM(gtpose.pose.position.y, gtpose.pose.position.x, gt_x, gt_y);
+
+        if (abs(gt_load[findGT_plus].header.stamp.toSec() - pctime) > 0.02)
+        {
+            cout << "[find_gt] warning: abs(gt_load[" << findGT_plus << "].header.stamp.toSec() - pctime): \t"
+                 << abs(gt_load[findGT_plus].header.stamp.toSec() - pctime) << endl;
+            cout << "[find_gt] warning: pctime: \t" << pctime << endl;
+            cout << "[find_gt] warning: gttime: \t" << gt_load[findGT_plus].header.stamp.toSec() << endl;
+            perror("[find_gt] time diff too large");
+            // exit(1);
+        }
+    }
+
+    void laserCloudRawHandler(const sensor_msgs::PointCloud2ConstPtr &msg)
+    {
+        if (!LocalizeFlag)
+            return;
+        // cout << "handler: enter LocalizeFlag segment" << endl;
+        laserCloudRawTime = msg->header.stamp.toSec();
+        laserCloudRaw->clear();
+        pcl::fromROSMsg(*msg, *laserCloudRaw);
+        laserCloudRawDS->clear();
+        downSizeFilterScancontext.setInputCloud(laserCloudRaw);
+        downSizeFilterScancontext.filter(*laserCloudRawDS);
+        if (generateMap)
+        {
+            // cout << "handler: enter generateMap segment" << endl;
+            if (saveRelocalKeyFrame)
+            {
+                std::string rawDS_path = SceneFolder;
+                rawDS_path += to_string(laserCloudRawTime) + '_';
+                rawDS_path += to_string(save_startind) + "th_keyframe" +  + ".pcd";
+                cout << "handler: enter saveRelocalKeyFrame segment and save pcd at: ";
+                cout << rawDS_path << endl;
+                pcl::io::savePCDFileASCII(rawDS_path, *laserCloudRawDS);
+                save_startind++;
+                pcdStillNotSave = false;
+                saveRelocalKeyFrame = false;
+            }
+            return;
+        }
+        pcl::PointCloud<PointType>::Ptr thisRawCloudKeyFrame(new pcl::PointCloud<PointType>());
+        pcl::copyPointCloud(*laserCloudRawDS, *thisRawCloudKeyFrame);
+        relocalNum = relocalNum + relocalHz;
+        if (relocalNum >= 10)
+        {
+            relocalNum = 0;
+            std::unique_lock<std::mutex> unilock(mtx_cv);
+            cv.wait(unilock, [&] { return premap_processed; });
+            cout << laserCloudRawTime << ", start detectRelocalID ..." << endl;
+            auto localizeResult = scManager.detectRelocalID(*thisRawCloudKeyFrame);
+            sci_localized = true;
+            localizeResultIndex = localizeResult.first;
+            YawDiff = localizeResult.second;
+            cout << "------ localizeResult.Index: " << localizeResultIndex;
+            cout << "------ localizeResult.YawDiff: " << YawDiff << endl;
+            unilock.unlock();
+
+            // ++relocalSaveInd;
+
+            // std::string relocalPcdPath = getenv("HOME");
+            // relocalPcdPath += "/catkin_ws/data/localizeFrame/";
+            // relocalPcdPath += to_string(relocalSaveInd) + "th_keyframe_";
+            // relocalPcdPath += to_string(laserCloudRawTime) + ".pcd";
+            // pcl::io::savePCDFileASCII(relocalPcdPath, *thisRawCloudKeyFrame);
+
+            if (localizeResultIndex != -1)
+            {
+                std::string resultName = files[localizeResultIndex];
+                double resultTime = atof(findIndex(findIndex(resultName, "th_keyframe"), "_").c_str());
+                int posindex = find_mappos(resultTime);
+                pcl::PointCloud<PointType>::Ptr resultpcd(new pcl::PointCloud<PointType>());
+
+                // a. single registration
+                // std::string resultpath = SceneFolder + files[localizeResultIndex];
+                // pcl::io::loadPCDFile(resultpath, *resultpcd);
+
+                // b. multi-frame registration
+                pcl::PointCloud<PointType>::Ptr oneframe(new pcl::PointCloud<PointType>());
+                double initRoll, initPitch, initHeading;
+                quat2euler(mappos_load[posindex].pose.orientation, initRoll, initPitch, initHeading);
+                for (int i = localizeResultIndex - 3; i <= localizeResultIndex + 3; i++)
+                {
+                    if (i < 0 || i >= files.size())
+                        continue;
+                    oneframe->clear();
+                    std::string resultpath = SceneFolder + files[i];
+                    pcl::io::loadPCDFile(resultpath, *oneframe);
+                    double neighborTime = atof(findIndex(findIndex(files[i], "th_keyframe"), "_").c_str());
+                    int neighborindex = find_mappos(neighborTime, true);
+
+                    // transformToFirst
+                    double diffX = mappos_load[neighborindex].pose.position.x -
+                                    mappos_load[posindex].pose.position.x;
+                    double diffY = mappos_load[neighborindex].pose.position.y -
+                                    mappos_load[posindex].pose.position.y;
+                    double deltaX = diffX * cos(initHeading) + diffY * sin(initHeading);
+                    double deltaY = -diffX * sin(initHeading) + diffY * cos(initHeading);
+
+                    double roll_gps, pitch_gps, yaw_gps;
+                    quat2euler(mappos_load[neighborindex].pose.orientation, roll_gps, pitch_gps, yaw_gps);
+                    // cout << i+1 << "th loaded frame's Heading: " << yaw_gps << endl;
+                    double diffHeading = yaw_gps - initHeading;
+
+                    for (int n = 0; n < oneframe->points.size(); n++)
+                    {
+                        double xInCar = oneframe->points[n].y * cos(3.4 / 180 * M_PI) -
+                                oneframe->points[n].x * sin(3.4 / 180 * M_PI) +
+                                0.0;
+                        double yInCar = -oneframe->points[n].x * cos(3.4 / 180 * M_PI) -
+                                oneframe->points[n].y * sin(3.4 / 180 * M_PI) +
+                                0.48;
+                        double px = xInCar * cos(diffHeading) -
+                                    yInCar * sin(diffHeading) + deltaX;
+                        double py = xInCar * sin(diffHeading) +
+                                    yInCar * cos(diffHeading) + deltaY;
+                        double px2 = (0.48 - py) * cos(3.4 / 180 * M_PI) - px * sin(3.4 / 180 * M_PI);
+                        double py2 = (0.48 - py) * sin(3.4 / 180 * M_PI) + px * cos(3.4 / 180 * M_PI);
+                        oneframe->points[n].x = px2;
+                        oneframe->points[n].y = py2;
+                    }
+                    *resultpcd += *oneframe;
+                }
+                
+                // cout << "[GPS evaluation] resultpcd's path: " << resultpath << endl;
+
+                // get gt position and sparse-estimation
+                double gt_x, gt_y, relocal_x, relocal_y;
+                find_gt(laserCloudRawTime, gt_x, gt_y);
+                relocal_x = mappos_load[posindex].pose.position.x;
+                relocal_y = mappos_load[posindex].pose.position.y;
+
+                if (sqrt((gt_x - relocal_x)*(gt_x - relocal_x)+(gt_y - relocal_y)*(gt_y - relocal_y)) >= 8 )
+                {
+                    cout << "[GPS validation] this frame is mismatch!!!" << endl;
+                    // double mindist = 100;
+                    // int minIndex = 1;
+                    // for(auto it2 = utmRecord_load.begin(); it2 != utmRecord_load.end(); ++it2)
+                    // {
+                    //     double dist = (utm_EN.first - it2->first)*(utm_EN.first - it2->first)+(utm_EN.second - it2->second)*(utm_EN.second - it2->second);
+                    //     if (dist < mindist)
+                    //     {
+                    //         mindist = dist;
+                    //         minIndex = (it2 - utmRecord_load.begin()) + 1;
+                    //     }
+                    // }   
+                    // ++mismatchNumber;
+                    // cout << "[GPS validation] currentFrameID: " << ++currentFrameID
+                    //      << "     failNumber: " << failNumber
+                    //      << "     mismatchNumber: " << mismatchNumber << "------" << endl;
+                    // std::ofstream gpsFail;
+                    // gpsFail.open(gpsFailPath, std::ios::app);
+                    // int FailFrameID = currentFrameID + 1;
+                    // gpsFail<<std::setprecision(15)<<utm_EN.first<<" "<<utm_EN.second<<" "<<FailFrameID<<" "<<misFlag<<" "<<minIndex<<endl;
+                    // gpsFail.close();
+                }
+
+                cout << std::setprecision(15) << "[GPS evaluation] relocal-frame GPS: "
+                     << relocal_x << ", " << relocal_y << endl;
+                cout << "[GPS evaluation] current GPS:       " << gt_x << ", " << gt_y << endl;
+                
+                Eigen::Affine3f relocal_tune;
+                float x, y, z, roll, pitch, yaw;
+
+                // pcl::NormalDistributionsTransform<PointType, PointType> ndt_relocal;
+                // // Setting scale dependent NDT parameters
+                // // Setting minimum transformation difference for termination condition.
+                // ndt_relocal.setTransformationEpsilon (0.01);
+                // // Setting maximum step size for More-Thuente line search.
+                // ndt_relocal.setStepSize (0.1);
+                // //Setting Resolution of NDT grid structure (VoxelGridCovariance).
+                // ndt_relocal.setResolution (1.0);
+                // // Setting max number of registration iterations.
+                // ndt_relocal.setMaximumIterations (35);
+                // // Setting point cloud to be aligned.
+                // ndt_relocal.setInputSource (thisRawCloudKeyFrame);
+                // // Setting point cloud to be aligned to.
+                // ndt_relocal.setInputTarget (resultpcd);
+                // pcl::PointCloud<PointType>::Ptr unused_result(new pcl::PointCloud<PointType>());
+                // ndt_relocal.align(*unused_result);
+                // cout << "[GPS evaluation] NDT fit score: " << ndt_relocal.getFitnessScore() << endl;
+                // if (ndt_relocal.hasConverged() == false || ndt_relocal.getFitnessScore() > historyKeyframeFitnessScore)
+                // {
+                //     cout << "[GPS evaluation] warning: bad NDT fit score, > " << historyKeyframeFitnessScore << endl;
+                // }
+                // if (ndt_relocal.hasConverged() == true)
+                // {
+                //     relocal_tune = ndt_relocal.getFinalTransformation(); // get transformation in camera frame (because points are in camera frame)
+
+                pcl::PassThrough<PointType> pass;
+                pass.setInputCloud(thisRawCloudKeyFrame);
+                pass.setFilterFieldName("z");
+                pass.setFilterLimits(-1.2, 20);
+                //pass.setFilterLimitsNegative (true);
+                pcl::PointCloud<PointType>::Ptr thisRawCloudKeyFrame_filtered(new pcl::PointCloud<PointType>());
+                pass.filter(*thisRawCloudKeyFrame_filtered);
+
+                pass.setInputCloud(resultpcd);
+                //pass.setFilterLimitsNegative (true);
+                pcl::PointCloud<PointType>::Ptr resultpcd_filtered(new pcl::PointCloud<PointType>());
+                pass.filter(*resultpcd_filtered);
+
+                pcl::IterativeClosestPoint<PointType, PointType> icp_relocal;
+                icp_relocal.setMaxCorrespondenceDistance(100);
+                icp_relocal.setMaximumIterations(100);
+                icp_relocal.setTransformationEpsilon(1e-6);
+                icp_relocal.setEuclideanFitnessEpsilon(1e-6);
+                icp_relocal.setRANSACIterations(0);
+
+                // Align clouds
+                // Eigen::Affine3f icpInitialMatFoo = pcl::getTransformation(0, 0, 0, yawDiffRad, 0, 0); // because within cam coord: (z, x, y, yaw, roll, pitch)
+                // Eigen::Matrix4f icpInitialMat = icpInitialMatFoo.matrix();
+                icp_relocal.setInputSource(thisRawCloudKeyFrame_filtered);
+                icp_relocal.setInputTarget(resultpcd_filtered);
+                pcl::PointCloud<PointType>::Ptr unused_result(new pcl::PointCloud<PointType>());
+                icp_relocal.align(*unused_result);
+                // icp_relocal.align(*unused_result, icpInitialMat); // PCL icp non-eye initial is bad ... don't use (LeGO LOAM author also said pcl transform is weird.)
+
+                cout << "[GPS evaluation] ICP fit score: " << icp_relocal.getFitnessScore() << endl;
+                if (icp_relocal.hasConverged() == false || icp_relocal.getFitnessScore() > historyKeyframeFitnessScore)
+                {
+                    perror("icp_relocal is bad");
+                    cout << "[GPS evaluation] warning: icp_relocal.hasConverged(): " << icp_relocal.hasConverged() << endl;
+                    cout << "[GPS evaluation] warning: icp fit score : " << icp_relocal.getFitnessScore()
+                         << ", historyKeyframeFitnessScore : " << historyKeyframeFitnessScore << endl;
+                }
+                if (icp_relocal.hasConverged() == true)
+                {
+                    relocal_tune = icp_relocal.getFinalTransformation(); // get transformation in camera frame (because points are in camera frame)
+                    pcl::getTranslationAndEulerAngles(relocal_tune.inverse(), x, y, z, roll, pitch, yaw);
+                    cout << "[GPS evaluation] The icp.trans is \n" << relocal_tune.matrix() << endl;
+                    cout << "[GPS evaluation] The icp.trans.inverse is \n" << relocal_tune.inverse().matrix() << endl;
+                    cout << "[GPS evaluation] The fine-tune result is "
+                         << "\n\tx:    " << x << "\ty:   " << y << "\tz:     " << z
+                         << "\n\troll: " << roll << "\tyaw: " << yaw << "\tpitch: " << pitch << endl;
+                    double roll_gps, pitch_gps, yaw_gps;
+                    quat2euler(mappos_load[posindex].pose.orientation, roll_gps, pitch_gps, yaw_gps);
+                    cout << "[GPS evaluation] The detected relocal frame's rpy is \n\t"
+                        //  << "roll: " << roll_gps << "\n\t"
+                        //  << "pitch: " << pitch_gps << "\n\t"
+                        //  << "yaw: " << yaw_gps << "\n\t"
+                         << "heading: " << yaw_gps << endl;
+                    double heading = yaw_gps;
+                    relocal_x = relocal_x - x * sin(heading) - y * cos(heading);
+                    relocal_y = relocal_y + x * cos(heading) - y * sin(heading);
+                    cout << "[GPS evaluation] The relocal fine-tune GPS:\n\t"
+                         << "relocal_x: " << relocal_x << "\t"
+                         << "relocal_y: " << relocal_y << "\n\t"
+                         << "diff_x:    " << relocal_x - gt_x << "\t"
+                         << "diff_y:    " << relocal_y - gt_y << endl;
+                    if (icp_relocal.getFitnessScore() < historyKeyframeFitnessScore)
+                    {
+                        evaluationTxt << std::setprecision(15)
+                                      << laserCloudRawTime
+                                      //   << "laserTime: " << laserCloudRawTime
+                                      //   << ", " << gt_x
+                                      //   << " " << gt_y << ", "
+                                      << " " << relocal_x - gt_x
+                                      << " " << relocal_y - gt_y
+                                      << " " << (YawDiff * 180.0 / M_PI)
+                                      << " " << x << " " << y
+                                      << " icp.fitok" << endl;
+                    }
+                    else
+                    {
+                        evaluationTxt << std::setprecision(15)
+                                      << laserCloudRawTime
+                                      //   << "laserTime: " << laserCloudRawTime
+                                      //   << ", " << gt_x
+                                      //   << " " << gt_y << ", "
+                                      << " " << relocal_x - gt_x
+                                      << " " << relocal_y - gt_y
+                                      << " " << (YawDiff * 180.0 / M_PI)
+                                      << " " << x << " " << y
+                                      << " icp.fitbad" << endl;
+                    }
+                }
+                else
+                {
+                    cout << "[GPS evaluation] The relocal non-tune GPS:\n\t"
+                              << "relocal_x: " << relocal_x << "\n\t"
+                              << "relocal_y: " << relocal_y << "\n\t"
+                              << "diff_x:    " << relocal_x - gt_x << "\n\t"
+                              << "diff_y:    " << relocal_y - gt_y << endl;
+                    evaluationTxt << std::setprecision(15)
+                                  << laserCloudRawTime
+                                  //   << "laserTime: " << laserCloudRawTime
+                                  //   << ", " << gt_x
+                                  //   << " " << gt_y << ", "
+                                  << " " << relocal_x - gt_x
+                                  << " " << relocal_y - gt_y
+                                  << " noicp" << endl;
+                }
+                cout << "\n\n";
+                // for (int i = 0; i < resultpcd->points.size(); i++)
+                // {
+                //     auto x = resultpcd->points[i].x * cos(YawDiff) - resultpcd->points[i].y * sin(YawDiff);
+                //     auto y = resultpcd->points[i].x * sin(YawDiff) + resultpcd->points[i].y * cos(YawDiff);
+                //     resultpcd->points[i].x = x;
+                //     resultpcd->points[i].y = y;
+                //     resultpcd->points[i].z += 20;
+                // }
+
+                {
+                    sensor_msgs::PointCloud2 cloudMsgTemp;
+                    pcl::toROSMsg(*resultpcd_filtered, cloudMsgTemp);
+                    cloudMsgTemp.header.stamp = ros::Time().fromSec(laserCloudRawTime);
+                    cloudMsgTemp.header.frame_id = "/velodyne";
+                    pubRelocalTarget.publish(cloudMsgTemp);
+                }
+                {
+                    sensor_msgs::PointCloud2 cloudMsgTemp;
+                    pcl::toROSMsg(*thisRawCloudKeyFrame_filtered, cloudMsgTemp);
+                    cloudMsgTemp.header.stamp = ros::Time().fromSec(laserCloudRawTime);
+                    cloudMsgTemp.header.frame_id = "/velodyne";
+                    pubRelocalSource.publish(cloudMsgTemp);
+                }
+                {
+                    sensor_msgs::PointCloud2 cloudMsgTemp;
+                    pcl::toROSMsg(*unused_result, cloudMsgTemp);
+                    cloudMsgTemp.header.stamp = ros::Time().fromSec(laserCloudRawTime);
+                    cloudMsgTemp.header.frame_id = "/velodyne";
+                    pubRelocalICP.publish(cloudMsgTemp);
+                }
+
+                /**
+----------------------------------------transform------------------------------------------------------
+                for (int trans = 0; trans < 21; ++trans)
+                {
+                    pcl::PointCloud<PointType>::Ptr copy(new pcl::PointCloud<PointType>());
+                    pcl::copyPointCloud(*resultpcd,  *copy);
+                for (int i = 0; i < copy->points.size(); i++)
+                {
+                    copy->points[i].y -= trans;
+                    copy->points[i].z -= 20;
+                }
+
+                sensor_msgs::PointCloud2 transformCloud;
+                pcl::toROSMsg(*copy, transformCloud);
+                transformCloud.header.stamp = ros::Time().fromSec(laserCloudRawTime);
+                transformCloud.header.frame_id = "/velodyne";
+                pubTransformCloud.publish(transformCloud);
+
+                Eigen::MatrixXd sc = forTransform.makeScancontext(*copy);
+                cv::Mat sciForRedPoint = forTransform.createSci(sc);
+                char name[100];
+                sprintf(name,"transformPoint_y+%d",trans);
+                cv::Mat sciForRedPointAddAxes = forTransform.addAxes(sciForRedPoint,name);
+                cv::imshow("transform point",sciForRedPointAddAxes);
+                cv::waitKey(1);
+                sleep(1);
+               
+                }
+----------------------------------------transform------------------------------------------------------
+**/
+            }
+            else
+            {
+                cout << "[GPS validation] this frame is failed!!!" << endl;
+                // double mindist = 100;
+                // int minIndex = 1;
+                // for(auto it2 = utmRecord_load.begin(); it2 != utmRecord_load.end(); ++it2)
+                // {
+                //     double dist = (utm_EN.first - it2->first)*(utm_EN.first - it2->first)+(utm_EN.second - it2->second)*(utm_EN.second - it2->second);
+                //     if (dist < mindist)
+                //     {
+                //         mindist = dist;
+                //         minIndex = (it2 - utmRecord_load.begin()) + 1;
+                //     }
+                // }               
+                // std::ofstream gpsFail;
+                // gpsFail.open(gpsFail_path, std::ios::app);
+                // int FailFrameID = currentFrameID + 1;
+                // gpsFail<<std::setprecision(15)<<utm_EN.first<<" "<<utm_EN.second<<" "<<FailFrameID<<" "<<failFlag<<" "<<minIndex<<endl;
+                // gpsFail.close();
+                // cout << "------" << "currentFrameID: " << ++currentFrameID << "     failNumber: " << ++failNumber << "     mismatchNumber: "<< mismatchNumber << "------"<<endl;
+            }
+            // cv.notify_one();
+        }
     }
 
     void visualizeGlobalMapThread()
@@ -1524,7 +1667,7 @@ public:
         // std::lock_guard<std::mutex> lock_1(mtx_cv);
         // files = getFiles(SceneFolder);
         // std::string pcdpath;
-        // std::cout << "loading... please wait" << pcdpath << std::endl;
+        // cout << "loading... please wait" << pcdpath << endl;
 
         // FILE *gpsIn;
         // std::pair<double,double> utm_EN;
@@ -1545,7 +1688,7 @@ public:
         //     ++i;
 
         // }
-        // std::cout << "loading finish" << pcdpath << std::endl;
+        // cout << "loading finish" << pcdpath << endl;
         // load_map_flag = false;
         // cv.notify_one();
         // }
@@ -1752,7 +1895,7 @@ public:
         {
             if (detectLoopClosure() == true)
             {
-                std::cout << std::endl;
+                cout << endl;
                 potentialLoopFlag = true; // find some key frames that is old enough or close enough for loop closure
                 timeSaveFirstCurrentScanForLoopClosure = timeLaserOdometry;
             }
@@ -1800,15 +1943,15 @@ public:
             pcl::PointCloud<PointType>::Ptr unused_result(new pcl::PointCloud<PointType>());
             icp.align(*unused_result);
 
-            std::cout << "[RS] ICP fit score: " << icp.getFitnessScore() << std::endl;
+            cout << "[RS] ICP fit score: " << icp.getFitnessScore() << endl;
             if (icp.hasConverged() == false || icp.getFitnessScore() > historyKeyframeFitnessScore)
             {
-                std::cout << "[RS] Reject this loop (bad icp fit score, > " << historyKeyframeFitnessScore << ")" << std::endl;
+                cout << "[RS] Reject this loop (bad icp fit score, > " << historyKeyframeFitnessScore << ")" << endl;
                 isValidRSloopFactor = false;
             }
             else
             {
-                std::cout << "[RS] The detected loop factor is added between Current [ " << latestFrameIDLoopCloure << " ] and RS nearest [ " << RSclosestHistoryFrameID << " ]" << std::endl;
+                cout << "[RS] The detected loop factor is added between Current [ " << latestFrameIDLoopCloure << " ] and RS nearest [ " << RSclosestHistoryFrameID << " ]" << endl;
                 isValidRSloopFactor = true;
             }
 
@@ -1855,15 +1998,15 @@ public:
             icp.align(*unused_result);
             // icp.align(*unused_result, icpInitialMat); // PCL icp non-eye initial is bad ... don't use (LeGO LOAM author also said pcl transform is weird.)
 
-            std::cout << "[SC] ICP fit score: " << icp.getFitnessScore() << std::endl;
+            cout << "[SC] ICP fit score: " << icp.getFitnessScore() << endl;
             if (icp.hasConverged() == false || icp.getFitnessScore() > historyKeyframeFitnessScore)
             {
-                std::cout << "[SC] Reject this loop (bad icp fit score, > " << historyKeyframeFitnessScore << ")" << std::endl;
+                cout << "[SC] Reject this loop (bad icp fit score, > " << historyKeyframeFitnessScore << ")" << endl;
                 isValidSCloopFactor = false;
             }
             else
             {
-                std::cout << "[SC] The detected loop factor is added between Current [ " << latestFrameIDLoopCloure << " ] and SC nearest [ " << SCclosestHistoryFrameID << " ]" << std::endl;
+                cout << "[SC] The detected loop factor is added between Current [ " << latestFrameIDLoopCloure << " ] and SC nearest [ " << SCclosestHistoryFrameID << " ]" << endl;
                 isValidSCloopFactor = true;
             }
 
@@ -2054,13 +2197,13 @@ public:
         downSizeFilterCorner.setInputCloud(laserCloudCornerLast);
         downSizeFilterCorner.filter(*laserCloudCornerLastDS);
         laserCloudCornerLastDSNum = laserCloudCornerLastDS->points.size();
-        // std::cout << "laserCloudCornerLastDSNum: " << laserCloudCornerLastDSNum << std::endl;
+        // cout << "laserCloudCornerLastDSNum: " << laserCloudCornerLastDSNum << endl;
 
         laserCloudSurfLastDS->clear();
         downSizeFilterSurf.setInputCloud(laserCloudSurfLast);
         downSizeFilterSurf.filter(*laserCloudSurfLastDS);
         laserCloudSurfLastDSNum = laserCloudSurfLastDS->points.size();
-        // std::cout << "laserCloudSurfLastDSNum: " << laserCloudSurfLastDSNum << std::endl;
+        // cout << "laserCloudSurfLastDSNum: " << laserCloudSurfLastDSNum << endl;
 
         laserCloudOutlierLastDS->clear();
         downSizeFilterOutlier.setInputCloud(laserCloudOutlierLast);
@@ -2570,6 +2713,7 @@ public:
 
 int main(int argc, char **argv)
 {
+    cout.setf(std::ios::fixed, std::ios::floatfield);
     ros::init(argc, argv, "lego_loam");
 
     ROS_INFO("\033[1;32m---->\033[0m Map Optimization Started.");
@@ -2586,9 +2730,11 @@ int main(int argc, char **argv)
     nh_getparam.getParam("Scene", MO.Scene);
     nh_getparam.getParam("MapFrameNum", MO.MapFrameNum);
     nh_getparam.getParam("relocalHz", MO.relocalHz);
-    nh_getparam.getParam("gpstxt_path", MO.gpstxt_path);
     nh_getparam.getParam("gpsDistThreshold", MO.distThreshold);
     nh_getparam.getParam("save_startind", MO.save_startind);
+    nh_getparam.getParam("evalPath", MO.evalPath);
+    nh_getparam.getParam("mapPospath", MO.mapPospath);
+    nh_getparam.getParam("gtpath", MO.gtpath);
 
     nh_getparam.getParam("Threshold", Threshold);
     nh_getparam.getParam("gpsFailPath", gpsFailPath);
@@ -2621,6 +2767,7 @@ int main(int argc, char **argv)
         float circle_angle = 0;
         int sector_index = 0, ring_index = 1;
         ros::Rate rate(200);
+        MO.evaluationTxt.open(MO.evalPath, std::ios::app);
         while (ros::ok())
         // while ( 1 )
         {
@@ -2724,6 +2871,7 @@ int main(int argc, char **argv)
             }
         }
 
+        MO.evaluationTxt.close();
         RelocalThread.join();
         visualizeMapThread.join();
     }
