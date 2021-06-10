@@ -1471,9 +1471,23 @@ public:
                 if (icp_relocal.hasConverged() == true)
                 {
                     relocal_tune = icp_relocal.getFinalTransformation(); // get transformation in camera frame (because points are in camera frame)
-                    pcl::getTranslationAndEulerAngles(relocal_tune.inverse(), x, y, z, roll, pitch, yaw);
+                    Eigen::Affine3f lidar2car;
+
+                    float A = -sin(3.4 / 180 * M_PI),  B = cos (3.4 / 180 * M_PI);
+
+                    lidar2car (0, 0) = A;   lidar2car (0, 1) = B;   lidar2car (0, 2) = 0;   lidar2car (0, 3) = 0;
+                    lidar2car (1, 0) = -B;  lidar2car (1, 1) = A;   lidar2car (1, 2) = 0;   lidar2car (1, 3) = 0.48;
+                    lidar2car (2, 0) = 0;   lidar2car (2, 1) = 0;   lidar2car (2, 2) = 1;   lidar2car (2, 3) = 0;
+                    lidar2car (3, 0) = 0;   lidar2car (3, 1) = 0;   lidar2car (3, 2) = 0;   lidar2car (3, 3) = 1;
+                    // cout << "test matrix *: " << (lidar2car.matrix()) * (lidar2car.inverse().matrix()) << endl;
+                    Eigen::Matrix4f middle_tuneMat = (relocal_tune.matrix()) * (lidar2car.inverse().matrix());
+                    Eigen::Matrix4f car_tuneMat =  (lidar2car.matrix()) * middle_tuneMat;
+                    Eigen::Affine3f car_tune;
+                    car_tune = car_tuneMat;
+                    // pcl::getTranslationAndEulerAngles(relocal_tune.inverse(), x, y, z, roll, pitch, yaw);
+                    pcl::getTranslationAndEulerAngles(car_tune, x, y, z, roll, pitch, yaw);
                     cout << "[GPS evaluation] The icp.trans is \n" << relocal_tune.matrix() << endl;
-                    cout << "[GPS evaluation] The icp.trans.inverse is \n" << relocal_tune.inverse().matrix() << endl;
+                    cout << "[GPS evaluation] The car_tune is \n" << car_tune.matrix() << endl;
                     cout << "[GPS evaluation] The fine-tune result is "
                          << "\n\tx:    " << x << "\ty:   " << y << "\tz:     " << z
                          << "\n\troll: " << roll << "\tyaw: " << yaw << "\tpitch: " << pitch << endl;
@@ -1485,8 +1499,10 @@ public:
                         //  << "yaw: " << yaw_gps << "\n\t"
                          << "heading: " << yaw_gps << endl;
                     double heading = yaw_gps;
-                    relocal_x = relocal_x - x * sin(heading) - y * cos(heading);
-                    relocal_y = relocal_y + x * cos(heading) - y * sin(heading);
+                    // relocal_x = relocal_x - x * sin(heading) - y * cos(heading);
+                    // relocal_y = relocal_y + x * cos(heading) - y * sin(heading);
+                    relocal_x = relocal_x + x * cos(heading) - y * sin(heading);
+                    relocal_y = relocal_y + x * sin(heading) + y * cos(heading);
                     cout << "[GPS evaluation] The relocal fine-tune GPS:\n\t"
                          << "relocal_x: " << relocal_x << "\t"
                          << "relocal_y: " << relocal_y << "\n\t"
