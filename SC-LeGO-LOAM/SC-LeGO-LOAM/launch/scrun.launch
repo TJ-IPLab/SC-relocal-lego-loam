@@ -10,22 +10,20 @@
     <param name="/generateMap" value="false" />
 
     <!--定位和建图都要改-->
-    <param name="/Scene" value="yuanqu_3.5m" />
+    <param name="/Scene" value="yuanqu_3.5m_zwz" />
 
     <!--定位要改-->
-    <param name="/MapFrameNum" value="315" />
+    <param name="/MapFrameNum" value="1824" />
     <param name="/evalPath" value="/home/ubuwgb/catkin_ws/data/pre_map/evaluation.txt" />
     <param name="/gpsFailPath" value="/home/ubuwgb/catkin_ws/data/pre_map/fail.txt" />
     <param name="/descriptor" value="sci" />
     <param name="/Threshold" value="0.4" />
-    <param name="/relocalHz" value="10" />
-    <param name="/mapPospath" value="/home/ubuwgb/catkin_ws/data/pre_map/yuanqu_3.5m/keyframe_pos/fusion.txt" />
-    <!-- <param name="/gtpath" value="/home/ubuwgb/catkin_ws/data/pre_map/yuanqu_3.5m/keyframe_pos/fusion.txt" /> -->
-    <param name="/gtpath" value="/home/ubuwgb/catkin_ws/data/pre_map/yuanqu_3.5m/gt/fusion.txt" />
+    <param name="/mapPospath" value="/home/ubuwgb/catkin_ws/data/pre_map/yuanqu_3.5m_zwz/keyframe_pos/fusion.txt" />
+    <param name="/gtpath" value="/home/ubuwgb/catkin_ws/data/pre_map/yuanqu_3.5m_zwz/gt/fusion.txt" />
 
     <!--建图要改-->
     <param name="/gpsDistThreshold" value="3.5" />
-    <param name="/save_startind" value="1" />
+    <param name="/save_startind" value="0" />
 
 
 

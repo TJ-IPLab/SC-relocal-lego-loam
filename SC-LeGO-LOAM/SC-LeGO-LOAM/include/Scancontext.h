@@ -105,13 +105,7 @@ public:
     int relocal_count = 0;
 
     // TJ-IPLab add
-    std::string gpsFail_path = "/home/ubuwgb/catkin_ws/data/pre_map/name.txt";
     std::string descriptorType = "sci";
-    std::vector<std::pair<double,double>> utmRecord;
-    std::vector<std::pair<double,double>> utmRecord_load;
-    std::vector<geometry_msgs::PoseStamped> fusionRecord_load;
-    std::pair<double,double> utm_EN;
-    std::pair<double,double> utm_EN_load;
 
     // data 
     std::vector<double> polarcontexts_timestamp_; // optional.
