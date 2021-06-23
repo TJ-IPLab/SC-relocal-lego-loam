@@ -868,6 +868,13 @@ public:
         float ty = s * transformCur[4];
         float tz = s * transformCur[5];
 
+#ifdef Z_0_DEBUG
+// 1st
+        rx = 0;
+        rz = 0;
+        ty = 0;
+#endif
+
         float x1 = cos(rz) * (pi->x - tx) + sin(rz) * (pi->y - ty);
         float y1 = -sin(rz) * (pi->x - tx) + cos(rz) * (pi->y - ty);
         float z1 = (pi->z - tz);
@@ -1358,6 +1365,12 @@ public:
         transformCur[0] += matX.at<float>(0, 0);
         transformCur[2] += matX.at<float>(1, 0);
         transformCur[4] += matX.at<float>(2, 0);
+#ifdef Z_0_DEBUG
+//2nd
+        transformCur[0] = 0;
+        transformCur[2] = 0;
+        transformCur[4] = 0;
+#endif
 
         for(int i=0; i<6; i++){
             if(isnan(transformCur[i]))
@@ -1582,6 +1595,12 @@ public:
         transformCur[4] += matX.at<float>(4, 0);
         transformCur[5] += matX.at<float>(5, 0);
 
+#ifdef Z_0_DEBUG
+//2nd
+        transformCur[0] = 0;
+        transformCur[2] = 0;
+        transformCur[4] = 0;
+#endif
         for(int i=0; i<6; i++){
             if(isnan(transformCur[i]))
                 transformCur[i]=0;
@@ -1722,6 +1741,13 @@ public:
         transformSum[3] = tx;
         transformSum[4] = ty;
         transformSum[5] = tz;
+
+#ifdef Z_0_DEBUG
+//2nd
+        transformSum[0] = 0;
+        transformSum[2] = 0;
+        transformSum[4] = 0;
+#endif
     }
 
     void publishOdometry(){

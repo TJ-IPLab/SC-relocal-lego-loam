@@ -53,6 +53,8 @@
 #include <mutex>
 
 #define PI 3.14159265
+#define Z_0_DEBUG // 4 times
+
 
 using namespace std;
 // rosbag filter "HK-Data20190316-2 20190331_NJ_LL.bag" "lidaronly_HK-Data20190316-2 20190331_NJ_LL.bag" "topic == '/velodyne_points'"
@@ -77,7 +79,7 @@ extern const int Horizon_SCAN = 1800;
 extern const float ang_res_x = 0.2;
 extern const float ang_res_y = 2.0;
 extern const float ang_bottom = 15.0+0.1;
-extern const int groundScanInd = 7;
+extern const int groundScanInd = 8; // debug
 
 // HDL-32E
 // extern const int N_SCAN = 32;

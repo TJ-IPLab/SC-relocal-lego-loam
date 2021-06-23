@@ -390,20 +390,20 @@ public:
         pubKeyframeMap = nh.advertise<sensor_msgs::PointCloud2>("/keyframe_map", 10);
 
         float filter_size;
-        downSizeFilterCorner.setLeafSize(0.2, 0.2, 0.2);
-        filter_size = 0.5;
+        downSizeFilterCorner.setLeafSize(0.02, 0.02, 0.02);
+        filter_size = 0.05;
         downSizeFilterScancontext.setLeafSize(filter_size, filter_size, filter_size);
-        filter_size = 0.3;
+        filter_size = 0.03;
         downSizeFilterSurf.setLeafSize(filter_size, filter_size, filter_size); // default 0.4;
-        downSizeFilterOutlier.setLeafSize(0.4, 0.4, 0.4);
+        downSizeFilterOutlier.setLeafSize(0.04, 0.04, 0.04);
 
-        filter_size = 0.3;
+        filter_size = 0.03;
         downSizeFilterHistoryKeyFrames.setLeafSize(filter_size, filter_size, filter_size); // default 0.4; for histor key frames of loop closure
-        filter_size = 1.0;
+        filter_size = 0.1;
         downSizeFilterSurroundingKeyPoses.setLeafSize(filter_size, filter_size, filter_size); // default 1; for surrounding key poses of scan-to-map optimization
 
-        downSizeFilterGlobalMapKeyPoses.setLeafSize(1.0, 1.0, 1.0);  // for global map visualization
-        downSizeFilterGlobalMapKeyFrames.setLeafSize(0.4, 0.4, 0.4); // for global map visualization
+        downSizeFilterGlobalMapKeyPoses.setLeafSize(filter_size, filter_size, filter_size);  // for global map visualization
+        downSizeFilterGlobalMapKeyFrames.setLeafSize(0.025, 0.025, 0.025); // for global map visualization
 
         odomAftMapped.header.frame_id = "/camera_init";
         odomAftMapped.child_frame_id = "/aft_mapped";
@@ -589,6 +589,12 @@ public:
         transformTobeMapped[3] = transformAftMapped[3] - (cos(transformTobeMapped[1]) * x2 + sin(transformTobeMapped[1]) * z2);
         transformTobeMapped[4] = transformAftMapped[4] - y2;
         transformTobeMapped[5] = transformAftMapped[5] - (-sin(transformTobeMapped[1]) * x2 + cos(transformTobeMapped[1]) * z2);
+// debug transformBefMapped
+
+        // cout << "\n Sum" << transformSum[0]<< ", "<< transformSum[2]<< ", "<< transformSum[4];
+        // cout << "\n Bef" << transformBefMapped[0]<< ", "<< transformBefMapped[2]<< ", "<< transformBefMapped[4];
+        // cout << "\n Aft" << transformAftMapped[0]<< ", "<< transformAftMapped[2]<< ", "<< transformAftMapped[4];
+        // cout << "\n Tobe" << transformTobeMapped[0]<< ", "<< transformTobeMapped[2]<< ", "<< transformTobeMapped[4];
     }
 
     void transformUpdate()
@@ -2441,6 +2447,15 @@ public:
         transformTobeMapped[3] += matX.at<float>(3, 0);
         transformTobeMapped[4] += matX.at<float>(4, 0);
         transformTobeMapped[5] += matX.at<float>(5, 0);
+        //debug
+        // cout << "\n matX Tobe" << transformTobeMapped[0]<< ", "<< transformTobeMapped[2]<< ", "<< transformTobeMapped[4];
+
+#ifdef Z_0_DEBUG
+// 3rd
+        transformTobeMapped[0] = 0;
+        transformTobeMapped[2] = 0;
+        transformTobeMapped[4] = 0;
+#endif
 
         float deltaR = sqrt(
             pow(pcl::rad2deg(matX.at<float>(0, 0)), 2) +

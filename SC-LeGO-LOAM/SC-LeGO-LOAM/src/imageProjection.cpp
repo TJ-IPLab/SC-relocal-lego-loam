@@ -82,9 +82,12 @@ private:
     uint16_t *queueIndX; // array for breadth-first search process of segmentation, for speed
     uint16_t *queueIndY;
 
+    int processNumDebug;
+
 public:
     ImageProjection():
         nh("~"){
+        processNumDebug = 0;
 
         subLaserCloud = nh.subscribe<sensor_msgs::PointCloud2>(pointCloudTopic, 1, &ImageProjection::cloudHandler, this);
 
@@ -163,6 +166,7 @@ public:
     void copyPointCloud(const sensor_msgs::PointCloud2ConstPtr& laserCloudMsg){
 
         cloudHeader = laserCloudMsg->header;
+        
         cloudHeader.stamp = ros::Time::now(); // Ouster lidar users may need to uncomment this line
         pcl::fromROSMsg(*laserCloudMsg, *laserCloudIn);
         // Remove Nan points
@@ -179,6 +183,10 @@ public:
     }
     
     void cloudHandler(const sensor_msgs::PointCloud2ConstPtr& laserCloudMsg){
+        //debug
+        processNumDebug++;
+        // if (processNumDebug > 700)
+        //     return;
 
         // 1. Convert ros message to pcl point cloud
         copyPointCloud(laserCloudMsg);
@@ -221,6 +229,11 @@ public:
             thisPoint.x = laserCloudIn->points[i].x;
             thisPoint.y = laserCloudIn->points[i].y;
             thisPoint.z = laserCloudIn->points[i].z;
+            // if (sqrt(thisPoint.x * thisPoint.x + thisPoint.y * thisPoint.y) < 1 || thisPoint.y < 0)
+            if (sqrt(thisPoint.x * thisPoint.x + thisPoint.y * thisPoint.y) < 0.8)
+            {
+                continue;
+            }
             // find the row and column index in the iamge for this point
             if (useCloudRing == true){
                 rowIdn = laserCloudInRing->points[i].ring;
@@ -283,9 +296,20 @@ public:
 
                 angle = atan2(diffZ, sqrt(diffX*diffX + diffY*diffY) ) * 180 / M_PI;
 
-                if (abs(angle - sensorMountAngle) <= 10){
+                // if (abs(angle - sensorMountAngle) <= 10){
+                //     groundMat.at<int8_t>(i,j) = 1;
+                //     groundMat.at<int8_t>(i+1,j) = 1;
+                // }
+                if (fullCloud->points[lowerInd].z < -0.27 && fullCloud->points[lowerInd].z > -0.33){
                     groundMat.at<int8_t>(i,j) = 1;
                     groundMat.at<int8_t>(i+1,j) = 1;
+                }
+
+                //debug too long
+                if (fullCloud->points[j + (i)*Horizon_SCAN].z < -0.2 && groundMat.at<int8_t>(i,j) != 1)
+                {
+                    //debug
+                    labelMat.at<int>(i,j) = -2;
                 }
             }
         }

@@ -1,12 +1,12 @@
 <launch>
     
     <!--- Run Rviz-->
-    <!-- <node pkg="rviz" type="rviz" name="rviz" args="-d $(find sc_lego_loam)/launch/slam.rviz" /> -->
-    <node pkg="rviz" type="rviz" name="rviz" args="-d $(find sc_lego_loam)/launch/relocal.rviz" />
+    <node pkg="rviz" type="rviz" name="rviz" args="-d $(find sc_lego_loam)/launch/slam.rviz" />
+    <!-- <node pkg="rviz" type="rviz" name="rviz" args="-d $(find sc_lego_loam)/launch/relocal.rviz" /> -->
     <!--- Sim Time -->
     <param name="/use_sim_time" value="false" />
     <!--- Run Mode -->
-    <param name="/LocalizeFlag" value="true" />
+    <param name="/LocalizeFlag" value="false" />
     <param name="/generateMap" value="false" />
 
     <!--定位和建图都要改-->
@@ -35,7 +35,7 @@
     <!--- LeGO-LOAM -->    
     <node pkg="sc_lego_loam" type="sc_imageProjection"    name="sc_imageProjection"    output="screen"/>
     <node pkg="sc_lego_loam" type="sc_featureAssociation" name="sc_featureAssociation" output="screen"/>
-    <node pkg="sc_lego_loam" type="sc_mapOptmization"     name="sc_mapOptmization"     output="log"/>
+    <node pkg="sc_lego_loam" type="sc_mapOptmization"     name="sc_mapOptmization"     output="screen"/>
     <node pkg="sc_lego_loam" type="sc_transformFusion"    name="sc_transformFusion"    output="screen"/>
 
 </launch>
