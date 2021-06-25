@@ -30,6 +30,10 @@
 #include "ImageAxesAdd.h"
 #include "geometry_msgs/PoseStamped.h"
 
+
+#include <image_transport/image_transport.h>
+#include <sensor_msgs/Image.h>
+
 using namespace Eigen;
 using namespace nanoflann;
 
@@ -58,8 +62,15 @@ std::vector<float> eig2stdvec( MatrixXd _eigmat );
 
 class SCManager
 {
+private:
+    ros::NodeHandle nh;
 public: 
-    SCManager( ) = default; // reserving data space (of std::vector) could be considered. but the descriptor is lightweight so don't care.
+    SCManager( ) : nh("~")
+    {
+        pubcursc = nh.advertise<sensor_msgs::Image>("/sc_current", 2);
+        pubmapsc = nh.advertise<sensor_msgs::Image>("/sc_map", 2);
+    }
+    // = default; // reserving data space (of std::vector) could be considered. but the descriptor is lightweight so don't care.
 
     Eigen::MatrixXd makeScancontext( pcl::PointCloud<SCPointType> & _scan_down );
     Eigen::MatrixXd makeRingkeyFromScancontext( Eigen::MatrixXd &_desc );
@@ -79,6 +90,7 @@ public:
     void setgpsFailPath(std::string gpsFailPath);
     void setDescriptor(std::string descriptor);
     std::pair<int, float> detectRelocalID( pcl::PointCloud<SCPointType> & _scan_down ); // int: nearest node index, float: relative yaw
+    std::vector<size_t> getCandidates();
 
 public:
     // hyper parameters ()
@@ -105,7 +117,11 @@ public:
     int relocal_count = 0;
 
     // TJ-IPLab add
-    std::string descriptorType = "sci";
+    std::string descriptorType = "sc";
+    double laserCloudRawTime;
+    cv_bridge::CvImage cvbridge;
+    ros::Publisher pubcursc, pubmapsc;
+    std::vector<size_t> candidates_;
 
     // data 
     std::vector<double> polarcontexts_timestamp_; // optional.

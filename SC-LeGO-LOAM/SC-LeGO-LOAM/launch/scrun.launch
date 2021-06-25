@@ -1,32 +1,30 @@
 <launch>
     
     <!--- Run Rviz-->
-    <node pkg="rviz" type="rviz" name="rviz" args="-d $(find sc_lego_loam)/launch/slam.rviz" />
+    <!-- <node pkg="rviz" type="rviz" name="rviz" args="-d $(find sc_lego_loam)/launch/slam.rviz" /> -->
     <!-- <node pkg="rviz" type="rviz" name="rviz" args="-d $(find sc_lego_loam)/launch/relocal.rviz" /> -->
+    <node pkg="rviz" type="rviz" name="rviz" args="-d $(find sc_lego_loam)/launch/relocal_img.rviz" />
     <!--- Sim Time -->
     <param name="/use_sim_time" value="false" />
     <!--- Run Mode -->
-    <param name="/LocalizeFlag" value="false" />
-    <param name="/generateMap" value="false" />
+    <param name="/LocalizeFlag" value="true" />
+    <param name="/generateMap" value="0" />
+    <!-- 0:relocal 1:genMap 2:genMapPlus -->
 
     <!--定位和建图都要改-->
-    <param name="/Scene" value="yuanqu_3.5m_zwz" />
+    <param name="/Scene" value="yuanqu_3.5m_plus" />
+    <param name="/MapFrameNum" value="0" />
 
     <!--定位要改-->
-    <param name="/MapFrameNum" value="1824" />
     <param name="/evalPath" value="/home/ubuwgb/catkin_ws/data/pre_map/evaluation.txt" />
-    <param name="/gpsFailPath" value="/home/ubuwgb/catkin_ws/data/pre_map/fail.txt" />
-    <param name="/descriptor" value="sci" />
+    <param name="/badPath" value="/home/ubuwgb/catkin_ws/data/pre_map/bad.txt" />
+    <param name="/descriptor" value="sc" />
     <param name="/Threshold" value="0.4" />
-    <param name="/mapPospath" value="/home/ubuwgb/catkin_ws/data/pre_map/yuanqu_3.5m_zwz/keyframe_pos/fusion.txt" />
-    <param name="/gtpath" value="/home/ubuwgb/catkin_ws/data/pre_map/yuanqu_3.5m_zwz/gt/fusion.txt" />
 
     <!--建图要改-->
-    <param name="/gpsDistThreshold" value="3.5" />
+    <param name="/distThreshold" value="3.5" />
+    <param name="/lateralNum" value="4" />
     <param name="/save_startind" value="0" />
-
-
-
 
     <!--- TF -->
     <node pkg="tf" type="static_transform_publisher" name="camera_init_to_map"  args="0 0 0 1.570795   0        1.570795 /map    /camera_init 10" />

@@ -6,7 +6,7 @@ const int scale = 10; // createSci for visulization
 
 cv::Mat SCManager::createSci(Eigen::MatrixXd &scsc)
 {
-    if (descriptorType == "sci")
+    if (descriptorType == "sc")
     {
         // 使用绝对高度可视化描述子
         const float maxz_sci = 23.7;
@@ -103,7 +103,7 @@ cv::Mat SCManager::createSci(Eigen::MatrixXd &scsc)
 
     else
     {
-        throw std::invalid_argument("check the value of descriptor, it should be sci, intensity, iris, mean or variance");
+        throw std::invalid_argument("check the value of descriptor, it should be sc, intensity, iris, mean or variance");
     }
 }
 
@@ -313,7 +313,7 @@ std::pair<double, int> SCManager::distanceBtnScanContext(MatrixXd &_sc1, MatrixX
 
 MatrixXd SCManager::makeScancontext(pcl::PointCloud<SCPointType> &_scan_down)
 {
-    if (descriptorType == "sci")
+    if (descriptorType == "sc")
     {
         TicToc t_making_desc;
 
@@ -577,7 +577,7 @@ MatrixXd SCManager::makeScancontext(pcl::PointCloud<SCPointType> &_scan_down)
 
     else
     {
-        throw std::invalid_argument("check the value of descriptor, it should be sci, intensity, iris, mean or variance");
+        throw std::invalid_argument("check the value of descriptor, it should be sc, intensity, iris, mean or variance");
     }
 } // SCManager::makeScancontext
 
@@ -726,6 +726,11 @@ void SCManager::setThres(double thres)
 
 } // SCManager::setThres
 
+std::vector<size_t> SCManager::getCandidates()
+{
+    return candidates_;
+} // SCManager::setThres
+
 std::pair<int, float> SCManager::detectRelocalID(pcl::PointCloud<SCPointType> &_scan_down)
 {
     Eigen::MatrixXd sc = makeScancontext(_scan_down); // v1
@@ -777,6 +782,7 @@ std::pair<int, float> SCManager::detectRelocalID(pcl::PointCloud<SCPointType> &_
      */
     TicToc t_calc_dist;
     cout << "---candidateFrame---" << endl;
+    candidates_ = candidate_indexes;
     for (int candidate_iter_idx = 0; candidate_iter_idx < NUM_CANDIDATES_FROM_TREE; candidate_iter_idx++)
     {
         cout << candidate_indexes[candidate_iter_idx] << ", ";
@@ -832,15 +838,27 @@ std::pair<int, float> SCManager::detectRelocalID(pcl::PointCloud<SCPointType> &_
 
     // --------------------------------------------------create sc image--------------------------------------
     cv::Mat sciForRedPoint = createSci(sc);
-    cv::Mat sciForRedPointAddAxes = addAxes(sciForRedPoint, "     red point");
+    cv::Mat sciForRedPointAddAxes = addAxes(sciForRedPoint, "     map frame");
 
     Eigen::MatrixXd scShift = circshift(polarcontexts_[nn_idx], nn_align);
     cv::Mat sciForWhitePoint = createSci(scShift);
-    cv::Mat sciForWhitePointAddAxes = addAxes(sciForWhitePoint, "     white point");
+    cv::Mat sciForWhitePointAddAxes = addAxes(sciForWhitePoint, "     cur frame");
 
-    cv::imshow("red point", sciForRedPointAddAxes);
-    cv::imshow("white point", sciForWhitePointAddAxes);
-    cv::waitKey(1);
+    cvbridge.encoding = "bgr8";
+
+    cvbridge.image = sciForRedPointAddAxes;
+    sensor_msgs::Image::Ptr imagemsg = cvbridge.toImageMsg();
+    imagemsg->header.stamp = ros::Time().fromSec(laserCloudRawTime);
+    pubcursc.publish(imagemsg);
+
+    cvbridge.image = sciForWhitePointAddAxes;
+    imagemsg = cvbridge.toImageMsg();
+    imagemsg->header.stamp = ros::Time().fromSec(laserCloudRawTime);
+    pubmapsc.publish(imagemsg);
+
+    // cv::imshow("red point", sciForRedPointAddAxes);
+    // cv::imshow("white point", sciForWhitePointAddAxes);
+    // cv::waitKey(1);
     // --------------------------------------------------create sc image--------------------------------------
 
     int pointNum = _scan_down.points.size();
