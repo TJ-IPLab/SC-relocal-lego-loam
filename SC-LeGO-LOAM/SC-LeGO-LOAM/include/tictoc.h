@@ -32,7 +32,7 @@ public:
     {
         end = std::chrono::system_clock::now();
         std::chrono::duration<double> elapsed_seconds = end - start;
-        double elapsed_ms = elapsed_seconds.count() * 1000;
+        elapsed_ms = elapsed_seconds.count() * 1000;
 
         if( disp_ )
         {
@@ -41,7 +41,13 @@ public:
         }
     }
 
+    double time()
+    {
+        return elapsed_ms;
+    }
+
 private:  
     std::chrono::time_point<std::chrono::system_clock> start, end;
     bool disp_ = false;
+    double elapsed_ms;
 };

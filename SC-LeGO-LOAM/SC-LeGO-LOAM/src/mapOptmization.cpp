@@ -354,7 +354,7 @@ public:
     std::vector<std::pair<double,double>> UtmQueue_genMap;
     std::pair<double,double> UtmCur_genMap;
     // std::vector<std::pair<double,double>> utmRecord_load;
-    double distThreshold;
+    double distThreshold, failUtmThreshold;
     int lateralNum, save_startind;
     bool saveRelocalKeyFrame;
     bool pcdStillNotSave;
@@ -964,12 +964,15 @@ public:
                     // cout << i << "th diff0!: \t" << abs(mappos_load[i].header.stamp.toSec() - frametime) << endl;
                     // cout << i + 1 << "th diff0!: \t" << abs(mappos_load[i + 1].header.stamp.toSec() - frametime) << endl;
  
-                    if (abs(mappos_load[i].header.stamp.toSec() - frametime) > 0.02)
+                    if (abs(mappos_load[i].header.stamp.toSec() - frametime) > 0.5)
                     {
-                        cout << "[find_mappos] warning: frametime: \t" << frametime << endl;
-                        cout << "[find_mappos] warning: postime: \t" << mappos_load[i].header.stamp.toSec() << endl;
+                        cout << "[find_mappos] warning: abs(mappos_load[" << i << "].header.stamp.toSec() - frametime): \t"
+                             << abs(mappos_load[i].header.stamp.toSec() - frametime) << endl;
+                        cout << "              warning: frametime: \t" << frametime << endl;
+                        cout << "              warning: postime: \t" << mappos_load[i].header.stamp.toSec() << endl;
                         perror("[find_mappos] time diff too large");
                         // exit(1);
+                        return -1;
                     }
                     return i;
                 }
@@ -989,12 +992,15 @@ public:
             }
         }
 
-        if (abs(mappos_load[findPOS_plus].header.stamp.toSec() - frametime) > 0.02)
+        if (abs(mappos_load[findPOS_plus].header.stamp.toSec() - frametime) > 0.5)
         {
-            cout << "[find_mappos] warning: frametime: \t" << frametime << endl;
-            cout << "[find_mappos] warning: postime: \t" << mappos_load[findPOS_plus].header.stamp.toSec() << endl;
+            cout << "[find_mappos] warning: abs(mappos_load[" << findPOS_plus << "].header.stamp.toSec() - frametime): \t"
+                 << abs(mappos_load[findPOS_plus].header.stamp.toSec() - frametime) << endl;
+            cout << "              warning: frametime: \t" << frametime << endl;
+            cout << "              warning: postime: \t" << mappos_load[findPOS_plus].header.stamp.toSec() << endl;
             perror("[find_mappos] time diff too large");
             // exit(1);
+            return -1;
         }
         return findPOS_plus;
     }
@@ -1113,7 +1119,7 @@ public:
         keyframeMap->clear();
         double initRoll, initPitch, initHeading;
         int initIndex;
-        for (int i = 0; i < MapFrameNum; i++)
+        for (int i = 0; i < MapFrameNum; i = i + lateralNum)
         {
             string pcdpath = SceneFolder + files[i];
             pcl::PointCloud<PointType>::Ptr loadRawCloudKeyFrame(new pcl::PointCloud<PointType>());
@@ -1124,6 +1130,15 @@ public:
             UtmCur_genMap.first = mappos_load[posindex].pose.position.x;
             UtmCur_genMap.second = mappos_load[posindex].pose.position.y;
             UtmQueue_genMap.emplace_back(UtmCur_genMap);
+            // for generateMap == 2
+            double roll_plus, pitch_plus, yaw_plus;
+            quat2euler(mappos_load[posindex].pose.orientation, roll_plus, pitch_plus, yaw_plus);
+            for (int trans = 1; trans < lateralNum; trans++)
+            {
+                UtmCur_genMap.first = UtmCur_genMap.first - distThreshold * cos(yaw_plus);
+                UtmCur_genMap.second = UtmCur_genMap.second - distThreshold * sin(yaw_plus);
+                UtmQueue_genMap.emplace_back(UtmCur_genMap);
+            }
             if (i == 0)
             {
                 initIndex = posindex;
@@ -1145,8 +1160,10 @@ public:
                 }
                 *keyframeMap += *loadRawCloudKeyFrame;
             }
-            else
+            else if (i % lateralNum == 0)
             {
+                cout << "loading map frame: " << pcdpath << endl;
+                cout << "loading map mappos: " << posindex << endl;
                 // transformToFirst
                 double diffX = mappos_load[posindex].pose.position.x -
                                mappos_load[initIndex].pose.position.x;
@@ -1300,6 +1317,8 @@ public:
 
     void laserCloudRawHandler(const sensor_msgs::PointCloud2ConstPtr &msg)
     {
+        TicToc t_localize(true);
+        TicToc t_mapping(true);
         if (!LocalizeFlag)
             return;
         // cout << "handler: enter LocalizeFlag segment" << endl;
@@ -1313,6 +1332,10 @@ public:
         if (generateMap)
         {
             int posindex = find_mappos(laserCloudRawTime);
+            if (posindex == -1)
+            {
+                return;
+            }
             gt_x = mappos_load[posindex].pose.position.x;
             gt_y = mappos_load[posindex].pose.position.y;
             UtmCur_genMap.first = gt_x;
@@ -1370,6 +1393,10 @@ public:
                         transP.x = px2;
                         transP.y = py2;
                         transP.z = laserCloudRawDS->points[i].z;
+                        double verticalAngle = atan2(transP.z, sqrt(transP.x * transP.x + transP.y * transP.y)) * 180 / M_PI;
+                        int rowIdn = (verticalAngle + ang_bottom) / ang_res_y;
+                        if (rowIdn < 0 || rowIdn >= N_SCAN)
+                            continue;
                         laserCloudRawDSmapPlus->points.push_back(transP);
                     }
                     std::string rawDS_path = SceneFolder;
@@ -1383,6 +1410,7 @@ public:
                     save_startind++;
                 }
             }
+            t_mapping.toc("mapping");
             return;
         }
         find_gt(laserCloudRawTime, gt_x, gt_y);
@@ -1423,6 +1451,7 @@ public:
         std::vector<size_t> candis = scManager.getCandidates();
         for (auto i:candis)
         {
+            cout << i << ", ";
             double localx = UtmQueue_genMap[i].first - baseEast;
             double localy = UtmQueue_genMap[i].second - baseNorth;
             imx = int(localx * resolution);
@@ -1436,7 +1465,8 @@ public:
             std::string resultName = files[localizeResultIndex];
             double resultTime = atof(findFrontIndex(findFrontIndex(resultName, "th_keyframe"), "_").c_str());
             int posindex = find_mappos(resultTime, true);
-            
+            int trueindex = floor(localizeResultIndex / lateralNum);
+            int truediff = localizeResultIndex % lateralNum;
             // get gt position and sparse-estimation
             double relocal_x, relocal_y;
             relocal_x = mappos_load[posindex].pose.position.x;
@@ -1444,10 +1474,25 @@ public:
             cout << std::setprecision(15) << "[GPS evaluation] relocal-frame GPS: "
                  << relocal_x << ", " << relocal_y << endl;
             cout << "[GPS evaluation] current GPS:       " << gt_x << ", " << gt_y << endl;
+            double roll_plus, pitch_plus, yaw_plus;
+            quat2euler(mappos_load[posindex].pose.orientation, roll_plus, pitch_plus, yaw_plus);
 
-            if (sqrt((gt_x - relocal_x) * (gt_x - relocal_x) + (gt_y - relocal_y) * (gt_y - relocal_y)) >= 8)
+            // for (int trans = 1; trans < lateralNum; trans++)
+            // {
+            //     UtmCur_genMap.first = UtmCur_genMap.first - distThreshold * cos(yaw_plus);
+            //     UtmCur_genMap.second = UtmCur_genMap.second - distThreshold * sin(yaw_plus);
+            //     UtmQueue_genMap.emplace_back(UtmCur_genMap);
+            // }
+
+            if (sqrt(
+                  (relocal_x - truediff * distThreshold * cos(yaw_plus) - gt_x)
+                * (relocal_x - truediff * distThreshold * cos(yaw_plus) - gt_x) 
+                + (relocal_y - truediff * distThreshold * sin(yaw_plus) - gt_y) 
+                * (relocal_y - truediff * distThreshold * sin(yaw_plus) - gt_y)
+                )>= failUtmThreshold)
             {
                 cout << "[GPS validation] this frame is mismatch!!!" << endl;
+                t_localize.toc("localize");
                 // double mindist = 100;
                 // int minIndex = 1;
                 // for(auto it2 = utmRecord_load.begin(); it2 != utmRecord_load.end(); ++it2)
@@ -1470,6 +1515,7 @@ public:
                        << " " << relocal_y - gt_y
                        << " " << gt_x
                        << " " << gt_y
+                       << " " << t_localize.time()
                        << endl;
                 
                 // visualize result
@@ -1506,15 +1552,18 @@ public:
             pcl::PointCloud<PointType>::Ptr oneframe(new pcl::PointCloud<PointType>());
             double initRoll, initPitch, initHeading;
             quat2euler(mappos_load[posindex].pose.orientation, initRoll, initPitch, initHeading);
-            for (int i = localizeResultIndex - 3; i <= localizeResultIndex + 3; i++)
+            for (int ii = trueindex - 3; ii <= trueindex + 3; ii++)
             {
+                int i = ii * lateralNum;
                 if (i < 0 || i >= files.size())
                     continue;
                 oneframe->clear();
                 std::string resultpath = SceneFolder + files[i];
+                cout << "loading true frame: " << resultpath << endl;
                 pcl::io::loadPCDFile(resultpath, *oneframe);
                 double neighborTime = atof(findFrontIndex(findFrontIndex(files[i], "th_keyframe"), "_").c_str());
                 int neighborindex = find_mappos(neighborTime, true);
+                cout << "loading true mappos: " << neighborindex << endl;
 
                 // transformToFirst
                 double diffX = mappos_load[neighborindex].pose.position.x -
@@ -1671,6 +1720,7 @@ public:
                      << "relocal_y: " << relocal_y << "\n\t"
                      << "diff_x:    " << relocal_x - gt_x << "\t"
                      << "diff_y:    " << relocal_y - gt_y << endl;
+                t_localize.toc("localize");
                 if (icp_relocal.getFitnessScore() < historyKeyframeFitnessScore)
                 {
                     evaluationTxt << std::setprecision(15)
@@ -1682,6 +1732,7 @@ public:
                                   << " " << gt_y
                                   << " " << (YawDiff * 180.0 / M_PI)
                                   << " " << x << " " << y
+                                  << " " << t_localize.time()
                                   << " " << icp_relocal.getFitnessScore()
                                   << " icp.fitok" << endl;
                 }
@@ -1696,12 +1747,14 @@ public:
                                   << " " << gt_y
                                   << " " << (YawDiff * 180.0 / M_PI)
                                   << " " << x << " " << y
+                                  << " " << t_localize.time()
                                   << " " << icp_relocal.getFitnessScore()
                                   << " icp.fitbad" << endl;
                 }
             }
             else
             {
+                t_localize.toc("localize");
                 cout << "[GPS evaluation] The relocal non-tune GPS:\n\t"
                      << "relocal_x: " << relocal_x << "\n\t"
                      << "relocal_y: " << relocal_y << "\n\t"
@@ -1714,6 +1767,7 @@ public:
                               << " " << relocal_y - gt_y
                               << " " << gt_x
                               << " " << gt_y
+                              << " " << t_localize.time()
                               << " icp.NotConverged" << endl;
             }
             cout << "\n\n";
@@ -1781,6 +1835,7 @@ public:
         }
         else
         {
+            t_localize.toc("localize");
             cout << "[GPS validation] this frame is failed!!!" << endl;
             // double mindist = 100;
             // int minIndex = 1;
@@ -1801,6 +1856,7 @@ public:
                     << " " << 999999
                     << " " << gt_x
                     << " " << gt_y
+                    << " " << t_localize.time()
                     << endl;
 
             cvbridge.image = realtimeMap;
@@ -2904,6 +2960,7 @@ int main(int argc, char **argv)
     nh_getparam.getParam("evalPath", MO.evalPath);
     nh_getparam.getParam("badPath", MO.badPath);
     nh_getparam.getParam("Threshold", Threshold);
+    nh_getparam.getParam("failUtmThreshold", MO.failUtmThreshold);
     nh_getparam.getParam("descriptor", descriptor);
 
     // mapping param

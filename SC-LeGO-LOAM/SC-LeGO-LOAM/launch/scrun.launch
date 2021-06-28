@@ -12,14 +12,15 @@
     <!-- 0:relocal 1:genMap 2:genMapPlus -->
 
     <!--定位和建图都要改-->
-    <param name="/Scene" value="yuanqu_3.5m_plus" />
-    <param name="/MapFrameNum" value="0" />
+    <param name="/Scene" value="outloop_debug" />
+    <param name="/MapFrameNum" value="1220" />
 
     <!--定位要改-->
     <param name="/evalPath" value="/home/ubuwgb/catkin_ws/data/pre_map/evaluation.txt" />
     <param name="/badPath" value="/home/ubuwgb/catkin_ws/data/pre_map/bad.txt" />
     <param name="/descriptor" value="sc" />
     <param name="/Threshold" value="0.4" />
+    <param name="/failUtmThreshold" value="8" />
 
     <!--建图要改-->
     <param name="/distThreshold" value="3.5" />
