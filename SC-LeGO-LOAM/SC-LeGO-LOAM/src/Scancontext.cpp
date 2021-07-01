@@ -384,7 +384,7 @@ MatrixXd SCManager::makeScancontext(pcl::PointCloud<SCPointType> &_scan_down)
             pt.z = _scan_down.points[pt_idx].z + LIDAR_HEIGHT; // naive adding is ok (all points should be > 0).
             pt.intensity = _scan_down.points[pt_idx].intensity;
 
-            if (pt.intensity < 0)
+            if (pt.z < 0)
             {
                 continue;
             }
@@ -455,13 +455,19 @@ MatrixXd SCManager::makeScancontext(pcl::PointCloud<SCPointType> &_scan_down)
             save_z[ring_idx - 1][sctor_idx - 1].push_back(pt.z);
         }
 
-        for (int i = 0; i != desc.rows(); ++i)
-            for (int j = 0; j != desc.cols(); ++j)
+        // reset no points to zero (for cosine dist later)
+        for (int row_idx = 0; row_idx < desc.rows(); row_idx++)
+            for (int col_idx = 0; col_idx < desc.cols(); col_idx++)
             {
-                if (save_z[i][j].empty())
+                if (save_z[row_idx][col_idx].empty())
+                {
+                    desc(row_idx, col_idx) = 0;
                     continue;
-                double mean = std::accumulate(save_z[i][j].begin(), save_z[i][j].end(), 0.0) / save_z[i][j].size();
-                desc(i, j) = mean;
+                }
+                double mean = std::accumulate(save_z[row_idx][col_idx].begin(),
+                                              save_z[row_idx][col_idx].end(), 0.0) /
+                              save_z[row_idx][col_idx].size();
+                desc(row_idx, col_idx) = mean;
             }
 
         t_making_desc.toc("PolarContext making");
@@ -483,7 +489,7 @@ MatrixXd SCManager::makeScancontext(pcl::PointCloud<SCPointType> &_scan_down)
         int ring_idx, sctor_idx;
         int k = 8;
         int pixelCount[PC_NUM_RING][PC_NUM_SECTOR][k] = {0};
-        double max_z = 23.7, min_z = 0;
+        double max_z = 80 * tan(15 / 180 * M_PI) + LIDAR_HEIGHT, min_z = 0;
 
         for (int pt_idx = 0; pt_idx < num_pts_scan_down; pt_idx++)
         {
@@ -626,6 +632,21 @@ void SCManager::makeAndSaveScancontextAndKeys(pcl::PointCloud<SCPointType> &_sca
     // cout <<polarcontext_vkeys_.size() << endl;
 
 } // SCManager::makeAndSaveScancontextAndKeys
+
+void SCManager::makeAndSaveScancontextAndKeysbySC(Eigen::MatrixXd sc)
+{
+    Eigen::MatrixXd ringkey = makeRingkeyFromScancontext(sc);
+    Eigen::MatrixXd sectorkey = makeSectorkeyFromScancontext(sc);
+    std::vector<float> polarcontext_invkey_vec = eig2stdvec(ringkey);
+
+    polarcontexts_.push_back(sc);
+    polarcontext_invkeys_.push_back(ringkey);
+    polarcontext_vkeys_.push_back(sectorkey);
+    polarcontext_invkeys_mat_.push_back(polarcontext_invkey_vec);
+
+    // cout <<polarcontext_vkeys_.size() << endl;
+
+} // SCManager::makeAndSaveScancontextAndKeysbySC
 
 std::pair<int, float> SCManager::detectLoopClosureID(void)
 {
@@ -894,5 +915,157 @@ std::pair<int, float> SCManager::detectRelocalID(pcl::PointCloud<SCPointType> &_
     return result;
 
 } // SCManager::detectRelocalID
+
+std::pair<int, float> SCManager::detectRelocalIDbySC(Eigen::MatrixXd sc)
+{
+    Eigen::MatrixXd ringkey = makeRingkeyFromScancontext(sc);
+    Eigen::MatrixXd sectorkey = makeSectorkeyFromScancontext(sc);
+    std::vector<float> polarcontext_invkey_vec = eig2stdvec(ringkey);
+
+    int loop_id{-1}; // init with -1
+
+    auto curr_key = polarcontext_invkey_vec; // current observation (query)
+    auto curr_desc = sc;                     // current observation (query)
+
+    // std::cout << "start detectRelocalIDbySC ... construct query finished" << std::endl;
+
+    /* 
+     * step 1: candidates from ringkey tree_
+     */
+
+    // tree_ reconstruction (not mandatory to make everytime)
+    TicToc t_tree_construction;
+
+    polarcontext_invkeys_to_search_.clear();
+    polarcontext_invkeys_to_search_.assign(polarcontext_invkeys_mat_.begin(), polarcontext_invkeys_mat_.end());
+
+    polarcontext_tree_.reset();
+    polarcontext_tree_ = std::make_unique<InvKeyTree>(PC_NUM_RING /* dim */, polarcontext_invkeys_to_search_, 10 /* max leaf */);
+    // tree_ptr_->index->buildIndex(); // inernally called in the constructor of InvKeyTree (for detail, refer the nanoflann and KDtreeVectorOfVectorsAdaptor)
+    t_tree_construction.toc("Tree construction");
+
+    double min_dist = 10000000; // init with somthing large
+    int nn_align = 0;
+    int nn_idx = 0;
+
+    // knn search
+    std::vector<size_t> candidate_indexes(NUM_CANDIDATES_FROM_TREE);
+    std::vector<float> out_dists_sqr(NUM_CANDIDATES_FROM_TREE);
+    // std::cout << "start detectRelocalIDbySC ... candidates from ringkey tree inited" << std::endl;
+
+    TicToc t_tree_search;
+    nanoflann::KNNResultSet<float> knnsearch_result(NUM_CANDIDATES_FROM_TREE);
+    knnsearch_result.init(&candidate_indexes[0], &out_dists_sqr[0]);
+    // std::cout << "start detectRelocalIDbySC ... ready to findNeighbors" << std::endl;
+    polarcontext_tree_->index->findNeighbors(knnsearch_result, &curr_key[0] /* query */, nanoflann::SearchParams(10));
+    t_tree_search.toc("Tree search");
+    // std::cout << "start detectRelocalIDbySC ... candidates from ringkey tree finished" << std::endl;
+
+    /* 
+     *  step 2: pairwise distance (find optimal columnwise best-fit using cosine distance)
+     */
+    TicToc t_calc_dist;
+    cout << "---candidateFrame---" << endl;
+    candidates_ = candidate_indexes;
+    for (int candidate_iter_idx = 0; candidate_iter_idx < NUM_CANDIDATES_FROM_TREE; candidate_iter_idx++)
+    {
+        cout << candidate_indexes[candidate_iter_idx] << ", ";
+        MatrixXd polarcontext_candidate = polarcontexts_[candidate_indexes[candidate_iter_idx]];
+        std::pair<double, int> sc_dist_result = distanceBtnScanContext(curr_desc, polarcontext_candidate);
+
+        double candidate_dist = sc_dist_result.first;
+        int candidate_align = sc_dist_result.second;
+
+        if (candidate_dist < min_dist)
+        {
+            min_dist = candidate_dist;
+            nn_align = candidate_align;
+
+            nn_idx = candidate_indexes[candidate_iter_idx];
+        }
+    }
+    cout << "\n---candidateFrame---" << endl;
+    t_calc_dist.toc("Distance calc");
+
+    // std::cout << "start detectRelocalIDbySC ... pairwise distance calculate finished" << std::endl;
+
+    /* 
+     * loop threshold check
+     */
+
+    //--------------------------------------------transform------------------------------------------------------------
+    /**    
+    cout<<"save is start"<<endl;
+    
+    std::string path = "/home/zeng/catkin_ws/data/original.pcd";
+    pcl::io::savePCDFileASCII(path, _scan_down);
+
+    for(int i = 0; i <21; ++i)
+    {
+        Eigen::MatrixXd sc_transform_x = makeTransformScancontext(_scan_down, i,0);
+        Eigen::MatrixXd sc_transform_y = makeTransformScancontext(_scan_down, 0,i);
+        Eigen::MatrixXd sc_transform_xy = makeTransformScancontext(_scan_down, i,i);
+        cv::Mat sci_transform_x = createSci(sc_transform_x);
+        cv::Mat sci_transform_y = createSci(sc_transform_y);
+        cv::Mat sci_transform_xy = createSci(sc_transform_xy);
+        char name_x[100],name_y[100],name_xy[100];
+        sprintf(name_x,"/home/zeng/catkin_ws/data/transform_x/x+%d.jpg",i);
+        sprintf(name_y,"/home/zeng/catkin_ws/data/transform_y/y+%d.jpg",i);
+        sprintf(name_xy,"/home/zeng/catkin_ws/data/transform_xy/x+%d,y+%d.jpg",i,i);
+        cv::imwrite(name_x,sci_transform_x);
+        cv::imwrite(name_y,sci_transform_y);
+        cv::imwrite(name_xy,sci_transform_xy);
+    }
+    cout<<"save is finish"<<endl;
+**/
+    //-----------------------------------------transform------------------------------------------------------------
+
+    // --------------------------------------------------create sc image--------------------------------------
+    cv::Mat sciForRedPoint = createSci(sc);
+    cv::Mat sciForRedPointAddAxes = addAxes(sciForRedPoint, "     map frame");
+
+    Eigen::MatrixXd scShift = circshift(polarcontexts_[nn_idx], nn_align);
+    cv::Mat sciForWhitePoint = createSci(scShift);
+    cv::Mat sciForWhitePointAddAxes = addAxes(sciForWhitePoint, "     cur frame");
+
+    cvbridge.encoding = "bgr8";
+
+    cvbridge.image = sciForRedPointAddAxes;
+    sensor_msgs::Image::Ptr imagemsg = cvbridge.toImageMsg();
+    imagemsg->header.stamp = ros::Time().fromSec(laserCloudRawTime);
+    pubcursc.publish(imagemsg);
+
+    cvbridge.image = sciForWhitePointAddAxes;
+    imagemsg = cvbridge.toImageMsg();
+    imagemsg->header.stamp = ros::Time().fromSec(laserCloudRawTime);
+    pubmapsc.publish(imagemsg);
+
+    // cv::imshow("red point", sciForRedPointAddAxes);
+    // cv::imshow("white point", sciForWhitePointAddAxes);
+    // cv::waitKey(1);
+    // --------------------------------------------------create sc image--------------------------------------
+
+    if (min_dist < SC_DIST_THRES)
+    {
+        loop_id = nn_idx;
+
+        // std::cout.precision(3);
+        cout << "[Relocalize found] Nearest distance: " << min_dist << " between current pointcloud and " << nn_idx << "." << endl;
+        cout << "[Relocalize found] yaw diff: " << nn_align * PC_UNIT_SECTORANGLE << " deg." << endl;
+    }
+    else
+    {
+        std::cout.precision(3);
+        cout << "[Not Relocalize] Nearest distance: " << min_dist << "between current pointcloud and " << nn_idx << "." << endl;
+        cout << "[Not Relocalize] yaw diff: " << nn_align * PC_UNIT_SECTORANGLE << " deg." << endl;
+    }
+
+    // To do: return also nn_align (i.e., yaw diff)
+    float yaw_diff_rad = deg2rad(nn_align * PC_UNIT_SECTORANGLE);
+    std::pair<int, float> result{loop_id, yaw_diff_rad};
+
+    return result;
+
+} // SCManager::detectRelocalIDbySC
 
 // } // namespace SC2

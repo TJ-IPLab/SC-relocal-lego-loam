@@ -90,6 +90,8 @@ public:
     void setgpsFailPath(std::string gpsFailPath);
     void setDescriptor(std::string descriptor);
     std::pair<int, float> detectRelocalID( pcl::PointCloud<SCPointType> & _scan_down ); // int: nearest node index, float: relative yaw
+    std::pair<int, float> detectRelocalIDbySC(Eigen::MatrixXd sc);
+    void makeAndSaveScancontextAndKeysbySC(Eigen::MatrixXd sc);
     std::vector<size_t> getCandidates();
 
 public:

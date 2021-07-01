@@ -57,6 +57,7 @@
 //#include "gnss_bestpose.h"
 #include "GPS2UTM.cpp"
 #include <pcl/filters/passthrough.h>
+#include <sstream>
 
 std::string findFrontIndex(string ori, /*string b, */ string c)
 {
@@ -344,11 +345,12 @@ private:
 public:
     bool LocalizeFlag;
     int generateMap; // 0:relocal 1:genMap 2:genMapPlus
+    bool readDescTxt;
     string Scene;
     int MapFrameNum;
     std::string SceneFolder;
-    std::string evalPath, mapPospath, gtpath, badPath;
-    std::ofstream evaluationTxt, badTxt;
+    std::string mapPospath, gtpath, evalPath, badPath, scPath;
+    std::ofstream evaluationTxt, badTxt, scTxt;
     std::vector<geometry_msgs::PoseStamped> gt_load;
     std::vector<geometry_msgs::PoseStamped> mappos_load;
     std::vector<std::pair<double,double>> UtmQueue_genMap;
@@ -369,6 +371,7 @@ public:
     {
         LocalizeFlag = false;
         generateMap = 0;
+        readDescTxt = false;
         saveRelocalKeyFrame = false;
         pcdStillNotSave = false;
         skipFusionHz = 10; // 10Hz
@@ -1111,7 +1114,9 @@ public:
 
     void RelocalThread()
     {
+        TicToc t_preload(true);
         loadpremap();
+        t_preload.toc("load premap");
     }
 
     void combineKeyframeMap()
@@ -1119,11 +1124,12 @@ public:
         keyframeMap->clear();
         double initRoll, initPitch, initHeading;
         int initIndex;
-        for (int i = 0; i < MapFrameNum; i = i + lateralNum)
+        for (int i = 0; i < MapFrameNum; i = i + 1)
         {
-            string pcdpath = SceneFolder + files[i];
-            pcl::PointCloud<PointType>::Ptr loadRawCloudKeyFrame(new pcl::PointCloud<PointType>());
-            pcl::io::loadPCDFile(pcdpath, *loadRawCloudKeyFrame);
+            if (i < 764 && i % lateralNum != 0)
+            {
+                continue;
+            }
             std::string curMapName = files[i];
             double curMapTime = atof(findFrontIndex(findFrontIndex(curMapName, "th_keyframe"), "_").c_str());
             int posindex = find_mappos(curMapTime, true);
@@ -1131,78 +1137,88 @@ public:
             UtmCur_genMap.second = mappos_load[posindex].pose.position.y;
             UtmQueue_genMap.emplace_back(UtmCur_genMap);
             // for generateMap == 2
-            double roll_plus, pitch_plus, yaw_plus;
-            quat2euler(mappos_load[posindex].pose.orientation, roll_plus, pitch_plus, yaw_plus);
-            for (int trans = 1; trans < lateralNum; trans++)
+            if (i < 764)
             {
-                UtmCur_genMap.first = UtmCur_genMap.first - distThreshold * cos(yaw_plus);
-                UtmCur_genMap.second = UtmCur_genMap.second - distThreshold * sin(yaw_plus);
-                UtmQueue_genMap.emplace_back(UtmCur_genMap);
-            }
-            if (i == 0)
-            {
-                initIndex = posindex;
-                quat2euler(mappos_load[posindex].pose.orientation, initRoll, initPitch, initHeading);
-                cout << "1th loaded frame's initHeading: " << initHeading << endl;
-                for (int n = 0; n < loadRawCloudKeyFrame->points.size(); n++)
+                double roll_plus, pitch_plus, yaw_plus;
+                quat2euler(mappos_load[posindex].pose.orientation, roll_plus, pitch_plus, yaw_plus);
+                for (int trans = 1; trans < lateralNum; trans++)
                 {
-                    double px = loadRawCloudKeyFrame->points[n].x;
-                    double py = loadRawCloudKeyFrame->points[n].y;
-
-                    double xInCar = py * cos(3.4 / 180 * M_PI) -
-                                    px * sin(3.4 / 180 * M_PI) +
-                                    0.0;
-                    double yInCar = -px * cos(3.4 / 180 * M_PI) -
-                                    py * sin(3.4 / 180 * M_PI) +
-                                    0.48;
-                    loadRawCloudKeyFrame->points[n].x = xInCar;
-                    loadRawCloudKeyFrame->points[n].y = yInCar;
+                    UtmCur_genMap.first = UtmCur_genMap.first - distThreshold * cos(yaw_plus);
+                    UtmCur_genMap.second = UtmCur_genMap.second - distThreshold * sin(yaw_plus);
+                    UtmQueue_genMap.emplace_back(UtmCur_genMap);
                 }
-                *keyframeMap += *loadRawCloudKeyFrame;
             }
-            else if (i % lateralNum == 0)
+
+            if (!readDescTxt)
             {
-                cout << "loading map frame: " << pcdpath << endl;
-                cout << "loading map mappos: " << posindex << endl;
-                // transformToFirst
-                double diffX = mappos_load[posindex].pose.position.x -
-                               mappos_load[initIndex].pose.position.x;
-                double diffY = mappos_load[posindex].pose.position.y -
-                               mappos_load[initIndex].pose.position.y;
-                // double deltaX = diffX * sin(initHeading) - diffY * cos(initHeading);
-                // double deltaY = diffX * cos(initHeading) + diffY * sin(initHeading);
-                double deltaX = diffX * cos(initHeading) + diffY * sin(initHeading);
-                double deltaY = -diffX * sin(initHeading) + diffY * cos(initHeading);
-
-                double roll_gps, pitch_gps, yaw_gps;
-                quat2euler(mappos_load[posindex].pose.orientation, roll_gps, pitch_gps, yaw_gps);
-                // cout << i+1 << "th loaded frame's Heading: " << yaw_gps << endl;
-                double diffHeading = yaw_gps - initHeading;
-
-                for (int n = 0; n < loadRawCloudKeyFrame->points.size(); n++)
+                string pcdpath = SceneFolder + files[i];
+                pcl::PointCloud<PointType>::Ptr loadRawCloudKeyFrame(new pcl::PointCloud<PointType>());
+                pcl::io::loadPCDFile(pcdpath, *loadRawCloudKeyFrame);
+                if (i == 0)
                 {
-                    double xInCar = loadRawCloudKeyFrame->points[n].y * cos(3.4 / 180 * M_PI) -
-                                    loadRawCloudKeyFrame->points[n].x * sin(3.4 / 180 * M_PI) +
-                                    0.0;
-                    double yInCar = -loadRawCloudKeyFrame->points[n].x * cos(3.4 / 180 * M_PI) -
-                                    loadRawCloudKeyFrame->points[n].y * sin(3.4 / 180 * M_PI) +
-                                    0.48;
-                    double px = xInCar * cos(diffHeading) -
-                                yInCar * sin(diffHeading) + deltaX;
-                    double py = xInCar * sin(diffHeading) +
-                                yInCar * cos(diffHeading) + deltaY;
-                    loadRawCloudKeyFrame->points[n].x = px;
-                    loadRawCloudKeyFrame->points[n].y = py;
+                    initIndex = posindex;
+                    quat2euler(mappos_load[posindex].pose.orientation, initRoll, initPitch, initHeading);
+                    cout << "1th loaded frame's initHeading: " << initHeading << endl;
+                    for (int n = 0; n < loadRawCloudKeyFrame->points.size(); n++)
+                    {
+                        double px = loadRawCloudKeyFrame->points[n].x;
+                        double py = loadRawCloudKeyFrame->points[n].y;
+
+                        double xInCar = py * cos(3.4 / 180 * M_PI) -
+                                        px * sin(3.4 / 180 * M_PI) +
+                                        0.0;
+                        double yInCar = -px * cos(3.4 / 180 * M_PI) -
+                                        py * sin(3.4 / 180 * M_PI) +
+                                        0.48;
+                        loadRawCloudKeyFrame->points[n].x = xInCar;
+                        loadRawCloudKeyFrame->points[n].y = yInCar;
+                    }
+                    *keyframeMap += *loadRawCloudKeyFrame;
                 }
-                *keyframeMap += *loadRawCloudKeyFrame;
-                if (i % 100 == 0)
+                else if (i % lateralNum == 0 || i >= 764)
                 {
-                    sensor_msgs::PointCloud2 cloudMsgTemp;
-                    pcl::toROSMsg(*keyframeMap, cloudMsgTemp);
-                    cloudMsgTemp.header.seq = i;
-                    cloudMsgTemp.header.stamp = ros::Time::now();
-                    cloudMsgTemp.header.frame_id = "/velodyne";
-                    pubKeyframeMap.publish(cloudMsgTemp);
+                    cout << "loading map frame: " << pcdpath << endl;
+                    cout << "loading map mappos: " << posindex << endl;
+                    // transformToFirst
+                    double diffX = mappos_load[posindex].pose.position.x -
+                                mappos_load[initIndex].pose.position.x;
+                    double diffY = mappos_load[posindex].pose.position.y -
+                                mappos_load[initIndex].pose.position.y;
+                    // double deltaX = diffX * sin(initHeading) - diffY * cos(initHeading);
+                    // double deltaY = diffX * cos(initHeading) + diffY * sin(initHeading);
+                    double deltaX = diffX * cos(initHeading) + diffY * sin(initHeading);
+                    double deltaY = -diffX * sin(initHeading) + diffY * cos(initHeading);
+
+                    double roll_gps, pitch_gps, yaw_gps;
+                    quat2euler(mappos_load[posindex].pose.orientation, roll_gps, pitch_gps, yaw_gps);
+                    // cout << i+1 << "th loaded frame's Heading: " << yaw_gps << endl;
+                    double diffHeading = yaw_gps - initHeading;
+
+                    for (int n = 0; n < loadRawCloudKeyFrame->points.size(); n++)
+                    {
+                        double xInCar = loadRawCloudKeyFrame->points[n].y * cos(3.4 / 180 * M_PI) -
+                                        loadRawCloudKeyFrame->points[n].x * sin(3.4 / 180 * M_PI) +
+                                        0.0;
+                        double yInCar = -loadRawCloudKeyFrame->points[n].x * cos(3.4 / 180 * M_PI) -
+                                        loadRawCloudKeyFrame->points[n].y * sin(3.4 / 180 * M_PI) +
+                                        0.48;
+                        double px = xInCar * cos(diffHeading) -
+                                    yInCar * sin(diffHeading) + deltaX;
+                        double py = xInCar * sin(diffHeading) +
+                                    yInCar * cos(diffHeading) + deltaY;
+                        loadRawCloudKeyFrame->points[n].x = px;
+                        loadRawCloudKeyFrame->points[n].y = py;
+                    }
+                    *keyframeMap += *loadRawCloudKeyFrame;
+                    if (i % 100 == 0)
+                    {
+                        sensor_msgs::PointCloud2 cloudMsgTemp;
+                        pcl::toROSMsg(*keyframeMap, cloudMsgTemp);
+                        cloudMsgTemp.header.seq = i;
+                        cloudMsgTemp.header.stamp = ros::Time::now();
+                        cloudMsgTemp.header.frame_id = "/velodyne";
+                        pubKeyframeMap.publish(cloudMsgTemp);
+                    }
                 }
             }
         }
@@ -1221,18 +1237,21 @@ public:
         imagemsg->header.stamp = ros::Time::now();
         pubRealtimeMapPoint.publish(imagemsg);
 
-        // pcl::io::savePCDFileASCII("/home/ubuwgb/keyframeMap.pcd", *keyframeMap);
-        sensor_msgs::PointCloud2 cloudMsgTemp;
-        pcl::toROSMsg(*keyframeMap, cloudMsgTemp);
-        cloudMsgTemp.header.stamp = ros::Time::now();
-        cloudMsgTemp.header.frame_id = "/velodyne";
-        pubKeyframeMap.publish(cloudMsgTemp);
+        if (!readDescTxt)
+        {
+            // pcl::io::savePCDFileASCII("/home/ubuwgb/keyframeMap.pcd", *keyframeMap);
+            sensor_msgs::PointCloud2 cloudMsgTemp;
+            pcl::toROSMsg(*keyframeMap, cloudMsgTemp);
+            cloudMsgTemp.header.stamp = ros::Time::now();
+            cloudMsgTemp.header.frame_id = "/velodyne";
+            pubKeyframeMap.publish(cloudMsgTemp);
+        }
     }
 
     void loadpremap()
     {
         files = getFiles(SceneFolder);
-        for (int i = 0; i < MapFrameNum; i++)
+        for (int i = 0; i < files.size(); i++)
         {
             cout << files[i] << " " << atof(findBackIndex(findFrontIndex(files[i], "th_keyframe"), "_").c_str()) << endl;
         }
@@ -1241,16 +1260,19 @@ public:
 
         double time, height, qx, qy, qz, qw, lat, lon;
 
-        for (int i = 0; i < MapFrameNum; i++)
+        if (!readDescTxt)
         {
-            pcdpath = SceneFolder + files[i];
-            pcl::PointCloud<PointType>::Ptr loadRawCloudKeyFrame(new pcl::PointCloud<PointType>());
-            pcl::io::loadPCDFile(pcdpath, *loadRawCloudKeyFrame);
-            // cout << "load " << pcdpath << endl;
-            scManager.makeAndSaveScancontextAndKeys(*loadRawCloudKeyFrame);
-            if (i % 50 == 0)
+            for (int i = 0; i < MapFrameNum; i++)
             {
-                cout << "load " << pcdpath << endl;
+                pcdpath = SceneFolder + files[i];
+                pcl::PointCloud<PointType>::Ptr loadRawCloudKeyFrame(new pcl::PointCloud<PointType>());
+                pcl::io::loadPCDFile(pcdpath, *loadRawCloudKeyFrame);
+                // cout << "load " << pcdpath << endl;
+                scManager.makeAndSaveScancontextAndKeys(*loadRawCloudKeyFrame);
+                if (i % 50 == 0)
+                {
+                    cout << "make context: " << pcdpath << endl;
+                }
             }
         }
         std::ifstream loadMapPos;
@@ -1285,30 +1307,79 @@ public:
                 << mappos_load.size() << " position is loaded.   start combine... " << endl;
 
         combineKeyframeMap();
-        cout << "premap is combined.   start load ground truth... " << endl;
+        cout << "premap is combined." << endl;
 
-        std::ifstream loadgt;
-        loadgt.open(gtpath.c_str());
-        while (!loadgt.eof() && loadgt.good())
+        if(readDescTxt)
         {
-            geometry_msgs::PoseStamped gtpose;
-            char buf[1000];
-            loadgt.getline(buf, 1000);
-            sscanf(buf, "%lf %lf %lf %lf %lf %lf %lf %lf\n", &time, &lat, &lon, &height, &qx, &qy, &qz, &qw);
-            gtpose.header.stamp.fromSec(time);
-            // cout << "loading time: " << gtpose.header.stamp.toSec() << endl;
-            gtpose.pose.position.x = lat;
-            gtpose.pose.position.y = lon;
-            gtpose.pose.position.z = height;
-            gtpose.pose.orientation.x = qx;
-            gtpose.pose.orientation.y = qy;
-            gtpose.pose.orientation.z = qz;
-            gtpose.pose.orientation.w = qw;
-            gt_load.emplace_back(gtpose);
+            cout << "start load sc descriptor... " << endl;
+            std::ifstream loadsc;
+            loadsc.open(scPath.c_str(), std::ios::in);
+            int pre_read_index(-2), read_index(-1);
+            // cout << "open sc.txt.\n";
+            // cout << "open sc.txt: loadsc.eof() :" << loadsc.eof() << "\n";
+            // cout << "open sc.txt: loadsc.bad() :" << loadsc.bad() << "\n";
+            // cout << "open sc.txt: loadsc.fail() :" << loadsc.fail() << "\n";
+            // cout << "open sc.txt: loadsc.good() :" << loadsc.good() << "\n";
+            while (!loadsc.eof() && loadsc.good())
+            {
+                cout << "start read sc.txt.\n";
+                MatrixXd desc = -1000 * MatrixXd::Ones(scManager.PC_NUM_RING, scManager.PC_NUM_SECTOR);
+                char buf[1000];
+                loadsc.getline(buf, 1000);
+                sscanf(buf, "%d \n", &read_index);
+                cout << read_index << "\n";
+                if (pre_read_index == read_index)
+                    continue;
+                pre_read_index = read_index;
+                string strline;
+                for (int i = 0; i < scManager.PC_NUM_RING; i++)
+                {
+                    getline(loadsc, strline);
+                    // loadsc.getline(strline, 1000);
+                    stringstream ss(strline);//初始化 法1
+                    double x;
+                    for (int j = 0; j < scManager.PC_NUM_SECTOR; j++)
+                    {
+                        ss >> x;
+                        desc(i, j) = x;
+                        // cout << x << ",";
+                    }
+                    // cout << ".\n";
+                }
+                // cout << "loading time: " << gtpose.header.stamp.toSec() << endl;
+                scManager.makeAndSaveScancontextAndKeysbySC(desc);
+            }
+            loadsc.close();
+            cout << pre_read_index + 1 << " sc descriptor is loaded." << endl;
         }
-        loadgt.close();
-        cout << gt_load.size() << " ground truth is loaded.   start localize... " << endl;
-
+        if(!generateMap)
+        {
+            cout << "start load ground truth... " << endl;
+            std::ifstream loadgt;
+            loadgt.open(gtpath.c_str());
+            while (!loadgt.eof() && loadgt.good())
+            {
+                geometry_msgs::PoseStamped gtpose;
+                char buf[1000];
+                loadgt.getline(buf, 1000);
+                sscanf(buf, "%lf %lf %lf %lf %lf %lf %lf %lf\n", &time, &lat, &lon, &height, &qx, &qy, &qz, &qw);
+                gtpose.header.stamp.fromSec(time);
+                // cout << "loading time: " << gtpose.header.stamp.toSec() << endl;
+                gtpose.pose.position.x = lat;
+                gtpose.pose.position.y = lon;
+                gtpose.pose.position.z = height;
+                gtpose.pose.orientation.x = qx;
+                gtpose.pose.orientation.y = qy;
+                gtpose.pose.orientation.z = qz;
+                gtpose.pose.orientation.w = qw;
+                gt_load.emplace_back(gtpose);
+            }
+            loadgt.close();
+            cout << gt_load.size() << " ground truth is loaded.   start localize... " << endl;
+        }
+        cout << mappos_load.size() << " position is read." << endl;
+        cout << UtmQueue_genMap.size() << " premap's position is loaded." << endl;
+        
         {
             std::lock_guard<std::mutex> lg(mtx_cv);
             premap_processed = true;
@@ -1352,15 +1423,34 @@ public:
                 for (int i = 0; i < UtmQueue_genMap.size(); i++)
                 {
                     if (sqrt((gt_x - UtmQueue_genMap[i].first) * (gt_x - UtmQueue_genMap[i].first) +
-                             (gt_y - UtmQueue_genMap[i].second) * (gt_y - UtmQueue_genMap[i].second)) <= distThreshold)
+                             (gt_y - UtmQueue_genMap[i].second) * (gt_y - UtmQueue_genMap[i].second)) <= fabs(distThreshold))
                     {
                         return;
                     }
                 }
+                // {
+                //     int i = UtmQueue_genMap.size() - 1;
+                //     if (sqrt((gt_x - UtmQueue_genMap[i].first) * (gt_x - UtmQueue_genMap[i].first) +
+                //              (gt_y - UtmQueue_genMap[i].second) * (gt_y - UtmQueue_genMap[i].second)) <= fabs(distThreshold))
+                //     {
+                //         return;
+                //     }
+                // }
                 // saveRelocalKeyFrame = true;
                 // cout << "saveRelocalKeyFrame = true | not empty" << endl;
                 // save position information
                 UtmQueue_genMap.push_back(UtmCur_genMap);
+                double localx = UtmCur_genMap.first - baseEast;
+                double localy = UtmCur_genMap.second - baseNorth;
+                int imx = int(localx * resolution);
+                int imy = resolution * range - int(localy * resolution);
+                cv::Point p(imx, imy);
+                cv::circle(baseMap, p, circleRadius, Scalar(100, 100, 100), -1);
+
+                cvbridge.image = baseMap;
+                sensor_msgs::Image::Ptr imagemsg = cvbridge.toImageMsg();
+                imagemsg->header.stamp = ros::Time::now();
+                pubRealtimeMapPoint.publish(imagemsg);
                 // pcdStillNotSave = true;
             }
             std::string rawDS_path = SceneFolder;
@@ -1369,6 +1459,19 @@ public:
             cout << "handler: enter saveRelocalKeyFrame segment and save pcd at: ";
             cout << rawDS_path << endl;
             pcl::io::savePCDFileASCII(rawDS_path, *laserCloudRawDS);
+
+            // write sc
+            scTxt << save_startind << "\n";
+            Eigen::MatrixXd sc = scManager.makeScancontext(*laserCloudRawDS);
+            for (int row_idx = 0; row_idx < sc.rows(); row_idx++)
+            {
+                for (int col_idx = 0; col_idx < sc.cols(); col_idx++)
+                {
+                    scTxt << sc(row_idx, col_idx) << " ";
+                }
+                scTxt << "\n";
+            }
+
             save_startind++;
             // pcdStillNotSave = false;
             // saveRelocalKeyFrame = false;
@@ -1407,6 +1510,19 @@ public:
                     laserCloudRawDSmapPlus->height = 1;
                     laserCloudRawDSmapPlus->width = laserCloudRawDSmapPlus->points.size();
                     pcl::io::savePCDFileASCII(rawDS_path, *laserCloudRawDSmapPlus);
+
+                    // write sc
+                    scTxt << save_startind << "\n";
+                    Eigen::MatrixXd sc = scManager.makeScancontext(*laserCloudRawDSmapPlus);
+                    for (int row_idx = 0; row_idx < sc.rows(); row_idx++)
+                    {
+                        for (int col_idx = 0; col_idx < sc.cols(); col_idx++)
+                        {
+                            scTxt << sc(row_idx, col_idx) << " ";
+                        }
+                        scTxt << "\n";
+                    }
+
                     save_startind++;
                 }
             }
@@ -1423,7 +1539,16 @@ public:
         pcl::copyPointCloud(*laserCloudRawDS, *thisRawCloudKeyFrame);
         cout << laserCloudRawTime << ", start detectRelocalID ..." << endl;
         scManager.laserCloudRawTime = laserCloudRawTime;
-        auto localizeResult = scManager.detectRelocalID(*thisRawCloudKeyFrame);
+        std::pair<int, float> localizeResult;
+        // todo: need by sc really?
+        if (readDescTxt)
+        {
+            localizeResult = scManager.detectRelocalID(*thisRawCloudKeyFrame);
+        }
+        else
+        {
+            localizeResult = scManager.detectRelocalID(*thisRawCloudKeyFrame);
+        }
         localizeResultIndex = localizeResult.first;
         YawDiff = localizeResult.second;
         cout << "------ localizeResult.Index: " << localizeResultIndex;
@@ -1449,16 +1574,21 @@ public:
         
         // visualize candidates
         std::vector<size_t> candis = scManager.getCandidates();
-        for (auto i:candis)
+        for (int i = 0; i < candis.size(); i++)
         {
-            cout << i << ", ";
-            double localx = UtmQueue_genMap[i].first - baseEast;
-            double localy = UtmQueue_genMap[i].second - baseNorth;
+            cout << candis[i] << ", ";
+            double localx = UtmQueue_genMap[candis[i]].first - baseEast;
+            double localy = UtmQueue_genMap[candis[i]].second - baseNorth;
             imx = int(localx * resolution);
             imy = resolution * range - int(localy * resolution);
             cv::Point pcandi(imx, imy);
+            if (imx >= realtimeMap.cols || imy >= realtimeMap.rows)
+            {
+                continue;
+            }
             cv::circle(realtimeMap, pcandi, circleRadius * 1.2, Scalar(255, 255, 255), -1);
         }
+        cout << ".\n";
 
         if (localizeResultIndex != -1)
         {
@@ -1467,6 +1597,11 @@ public:
             int posindex = find_mappos(resultTime, true);
             int trueindex = floor(localizeResultIndex / lateralNum);
             int truediff = localizeResultIndex % lateralNum;
+            if (localizeResultIndex >= 764)
+            {
+                trueindex = localizeResultIndex;
+                truediff = 0;
+            }
             // get gt position and sparse-estimation
             double relocal_x, relocal_y;
             relocal_x = mappos_load[posindex].pose.position.x;
@@ -1555,6 +1690,10 @@ public:
             for (int ii = trueindex - 3; ii <= trueindex + 3; ii++)
             {
                 int i = ii * lateralNum;
+                if (ii >= 764)
+                {
+                    i = ii;
+                }
                 if (i < 0 || i >= files.size())
                     continue;
                 oneframe->clear();
@@ -2949,6 +3088,7 @@ int main(int argc, char **argv)
 
     nh_getparam.getParam("LocalizeFlag", MO.LocalizeFlag);
     nh_getparam.getParam("generateMap", MO.generateMap);
+    nh_getparam.getParam("readDescTxt", MO.readDescTxt);
     nh_getparam.getParam("Scene", MO.Scene);
     MO.mapPospath = "/home/ubuwgb/catkin_ws/data/pre_map/" + MO.Scene + "/keyframe_pos/fusion.txt";
     MO.gtpath = "/home/ubuwgb/catkin_ws/data/pre_map/" + MO.Scene + "/gt/fusion.txt";
@@ -2962,6 +3102,7 @@ int main(int argc, char **argv)
     nh_getparam.getParam("Threshold", Threshold);
     nh_getparam.getParam("failUtmThreshold", MO.failUtmThreshold);
     nh_getparam.getParam("descriptor", descriptor);
+    MO.scPath = "/home/ubuwgb/catkin_ws/data/pre_map/" + MO.Scene + "/keyframe_desc/" + descriptor + ".txt";
 
     // mapping param
     nh_getparam.getParam("distThreshold", MO.distThreshold);
@@ -2982,12 +3123,14 @@ int main(int argc, char **argv)
         std::thread RelocalThread(&mapOptimization::RelocalThread, &MO);
         if (MO.generateMap)
         {
+            MO.scTxt.open(MO.scPath, std::ios::app);
             ros::Rate rate(200);
             while (ros::ok())
             {
                 ros::spinOnce();
                 rate.sleep();
             }
+            MO.scTxt.close();
             return 0;
         }
 
