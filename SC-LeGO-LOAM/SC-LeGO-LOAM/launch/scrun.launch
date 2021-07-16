@@ -13,20 +13,22 @@
     <!-- 0:relocal 1:genMap 2:genMapPlus -->
 
     <!--定位和建图都要改-->
-    <param name="/Scene" value="yuanqu_3.5m_plus" />
-    <param name="/MapFrameNum" value="1885" />
+    <!-- <param name="/Scene" value="yuanqu_3.5m" />
+    <param name="/MapFrameNum" value="315" /> -->
+    <param name="/Scene" value="insideLoop" />
+    <param name="/MapFrameNum" value="191" />
+    <param name="/distThreshold" value="-3.5" />
+    <param name="/lateralNum" value="1" />
 
     <!--定位要改-->
     <param name="/evalPath" value="/home/ubuwgb/catkin_ws/data/pre_map/evaluation.txt" />
     <param name="/badPath" value="/home/ubuwgb/catkin_ws/data/pre_map/bad.txt" />
-    <param name="/descriptor" value="mean" />
+    <param name="/descriptor" value="sc" />
     <param name="/Threshold" value="0.4" />
     <param name="/failUtmThreshold" value="8" />
 
     <!--建图要改-->
-    <param name="/distThreshold" value="-3.5" />
-    <param name="/lateralNum" value="4" />
-    <param name="/save_startind" value="1885" />
+    <param name="/save_startind" value="0" />
 
     <!--- TF -->
     <node pkg="tf" type="static_transform_publisher" name="camera_init_to_map"  args="0 0 0 1.570795   0        1.570795 /map    /camera_init 10" />

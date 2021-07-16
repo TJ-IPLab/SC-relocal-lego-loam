@@ -53,7 +53,7 @@
 #include <mutex>
 
 #define PI 3.14159265
-#define Z_0_DEBUG // 4 times
+#define Z_0_DEBUG // 3 times
 
 
 using namespace std;

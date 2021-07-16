@@ -39,6 +39,7 @@ cv::Mat SCManager::createSci(Eigen::MatrixXd &scsc)
                 if (scsc(i, j) > maxIntensity)
                     maxIntensity = scsc(i, j);
             }
+        maxIntensity = 255; // 使用绝对最大强度
         for (int i = 0; i < scsc.rows(); i++)
             for (int j = 0; j < scsc.cols(); j++)
             {
@@ -802,11 +803,22 @@ std::pair<int, float> SCManager::detectRelocalID(pcl::PointCloud<SCPointType> &_
      *  step 2: pairwise distance (find optimal columnwise best-fit using cosine distance)
      */
     TicToc t_calc_dist;
+    cout << "---curFrame---" << endl;
+    for (auto i : curr_key)
+    {
+        cout << i << ", ";
+    }
+    cout << endl;
     cout << "---candidateFrame---" << endl;
     candidates_ = candidate_indexes;
     for (int candidate_iter_idx = 0; candidate_iter_idx < NUM_CANDIDATES_FROM_TREE; candidate_iter_idx++)
     {
-        cout << candidate_indexes[candidate_iter_idx] << ", ";
+        cout << "[" << candidate_indexes[candidate_iter_idx] << ": " << out_dists_sqr[candidate_iter_idx] << "]\n";
+        for (auto i : polarcontext_invkeys_mat_[candidate_indexes[candidate_iter_idx]])
+        {
+            cout << i << ", ";
+        }
+        cout << endl;
         MatrixXd polarcontext_candidate = polarcontexts_[candidate_indexes[candidate_iter_idx]];
         std::pair<double, int> sc_dist_result = distanceBtnScanContext(curr_desc, polarcontext_candidate);
 
@@ -821,7 +833,7 @@ std::pair<int, float> SCManager::detectRelocalID(pcl::PointCloud<SCPointType> &_
             nn_idx = candidate_indexes[candidate_iter_idx];
         }
     }
-    cout << "\n---candidateFrame---" << endl;
+    cout << endl;
     t_calc_dist.toc("Distance calc");
 
     // std::cout << "start detectRelocalID ... pairwise distance calculate finished" << std::endl;
@@ -859,11 +871,11 @@ std::pair<int, float> SCManager::detectRelocalID(pcl::PointCloud<SCPointType> &_
 
     // --------------------------------------------------create sc image--------------------------------------
     cv::Mat sciForRedPoint = createSci(sc);
-    cv::Mat sciForRedPointAddAxes = addAxes(sciForRedPoint, "     map frame");
+    cv::Mat sciForRedPointAddAxes = addAxes(sciForRedPoint, "     cur frame");
 
     Eigen::MatrixXd scShift = circshift(polarcontexts_[nn_idx], nn_align);
     cv::Mat sciForWhitePoint = createSci(scShift);
-    cv::Mat sciForWhitePointAddAxes = addAxes(sciForWhitePoint, "     cur frame");
+    cv::Mat sciForWhitePointAddAxes = addAxes(sciForWhitePoint, "     map frame");
 
     cvbridge.encoding = "bgr8";
 
