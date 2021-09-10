@@ -1737,7 +1737,7 @@ public:
                                     oneframe->points[n].x * sin(3.4 / 180 * M_PI) +
                                     0.0;
                     double yInCar = -oneframe->points[n].x * cos(3.4 / 180 * M_PI) -
-                                    oneframehavetry->points[n].y * sin(3.4 / 180 * M_PI) +
+                                    oneframe->points[n].y * sin(3.4 / 180 * M_PI) +
                                     0.48;
                     double px = xInCar * cos(diffHeading) -
                                 yInCar * sin(diffHeading) + deltaX;
@@ -3149,7 +3149,7 @@ int main(int argc, char **argv)
     mapOptimization MO;
     ros::NodeHandle nh_getparam;
 
-    double Threshold;
+    double Threshold, Height;
     std::string descriptor;
 
     nh_getparam.getParam("LocalizeFlag", MO.LocalizeFlag);
@@ -3167,6 +3167,7 @@ int main(int argc, char **argv)
     nh_getparam.getParam("evalPath", MO.evalPath);
     nh_getparam.getParam("badPath", MO.badPath);
     nh_getparam.getParam("Threshold", Threshold);
+    nh_getparam.getParam("Height", Height);
     nh_getparam.getParam("failUtmThreshold", MO.failUtmThreshold);
     nh_getparam.getParam("descriptor", descriptor);
     MO.scPath = "/home/ubuwgb/catkin_ws/data/pre_map/" + MO.Scene + "/keyframe_desc/" + descriptor + ".txt";
@@ -3179,6 +3180,7 @@ int main(int argc, char **argv)
     MO.SceneFolder = getenv("HOME");
     MO.SceneFolder += "/catkin_ws/data/pre_map/" + MO.Scene + "/keyframe/";
     MO.scManager.setThres(Threshold);
+    MO.scManager.setLidarHeight(Height);
     MO.scManager.setDescriptor(descriptor);
     // MO.getRelocalParam(initLocalizeFlag, initgenerateMap, initScene, initMapFrameNum, Threshold, Hz, getgpsPath, getgpsFailPath, getgpsDistThreshold, getDescriptor);
 

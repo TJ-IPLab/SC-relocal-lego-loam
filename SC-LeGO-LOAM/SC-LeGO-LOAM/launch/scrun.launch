@@ -9,16 +9,20 @@
     <!--- Run Mode -->
     <param name="/LocalizeFlag" value="true" />
     <param name="/generateMap" value="0" />
-    <param name="/readDescTxt" value="false" />
+    <param name="/readDescTxt" value="true" />
     <!-- 0:relocal 1:genMap 2:genMapPlus -->
 
     <!--定位和建图都要改-->
     <!-- <param name="/Scene" value="yuanqu_3.5m" />
     <param name="/MapFrameNum" value="315" /> -->
-    <param name="/Scene" value="insideLoop" />
-    <param name="/MapFrameNum" value="191" />
+    <param name="/Scene" value="yuanqu_3.5m_plus" />
+    <param name="/MapFrameNum" value="1885" />
+    <!-- <param name="/Scene" value="insideLoop" />
+    <param name="/MapFrameNum" value="191" /> -->
     <param name="/distThreshold" value="-3.5" />
     <param name="/lateralNum" value="1" />
+    <param name="/Height" value="1.7" />
+    <!-- <param name="/Height" value="0.3" /> -->
 
     <!--定位要改-->
     <param name="/evalPath" value="/home/ubuwgb/catkin_ws/data/pre_map/evaluation.txt" />

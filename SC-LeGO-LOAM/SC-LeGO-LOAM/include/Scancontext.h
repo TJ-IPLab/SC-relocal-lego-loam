@@ -88,6 +88,7 @@ public:
     void makeAndSaveScancontextAndKeys( pcl::PointCloud<SCPointType> & _scan_down );
     std::pair<int, float> detectLoopClosureID( void ); // int: nearest node index, float: relative yaw
     void setThres(double thres);
+    void setLidarHeight(double height);
     void setgpsFailPath(std::string gpsFailPath);
     void setDescriptor(std::string descriptor);
     std::pair<int, float> detectRelocalID( pcl::PointCloud<SCPointType> & _scan_down ); // int: nearest node index, float: relative yaw
@@ -97,7 +98,7 @@ public:
 
 public:
     // hyper parameters ()
-    const double LIDAR_HEIGHT = 1.7; // lidar height : add this for simply directly using lidar scan in the lidar local coord (not robot base coord) / if you use robot-coord-transformed lidar scans, just set this as 0.
+    double LIDAR_HEIGHT = 1.7; // lidar height : add this for simply directly using lidar scan in the lidar local coord (not robot base coord) / if you use robot-coord-transformed lidar scans, just set this as 0.
 
     const int    PC_NUM_RING = 20; // 20 in the original paper (IROS 18)
     const int    PC_NUM_SECTOR = 60; // 60 in the original paper (IROS 18)

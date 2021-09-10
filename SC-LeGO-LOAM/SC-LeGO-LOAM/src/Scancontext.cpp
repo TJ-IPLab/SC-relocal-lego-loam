@@ -246,10 +246,12 @@ double SCManager::distDirectSC(MatrixXd &_sc1, MatrixXd &_sc2)
             continue; // don't count this sector pair.
 
         double sector_similarity = col_sc1.dot(col_sc2) / (col_sc1.norm() * col_sc2.norm());
+        cout << sector_similarity << ", ";
 
         sum_sector_similarity = sum_sector_similarity + sector_similarity;
         num_eff_cols = num_eff_cols + 1;
     }
+    cout << "\n";
 
     double sc_sim = sum_sector_similarity / num_eff_cols;
     return 1.0 - sc_sim;
@@ -307,6 +309,8 @@ std::pair<double, int> SCManager::distanceBtnScanContext(MatrixXd &_sc1, MatrixX
             min_sc_dist = cur_sc_dist;
         }
     }
+    MatrixXd sc2_shifted = circshift(_sc2, argmin_shift);
+    double x = distDirectSC(_sc1, sc2_shifted);
 
     return make_pair(min_sc_dist, argmin_shift);
 
@@ -748,6 +752,12 @@ void SCManager::setThres(double thres)
 
 } // SCManager::setThres
 
+void SCManager::setLidarHeight(double height)
+{
+    LIDAR_HEIGHT = height;
+
+} // SCManager::setLidarHeight
+
 std::vector<size_t> SCManager::getCandidates()
 {
     return candidates_;
@@ -816,7 +826,7 @@ std::pair<int, float> SCManager::detectRelocalID(pcl::PointCloud<SCPointType> &_
         cout << "[" << candidate_indexes[candidate_iter_idx] << ": " << out_dists_sqr[candidate_iter_idx] << "]\n";
         for (auto i : polarcontext_invkeys_mat_[candidate_indexes[candidate_iter_idx]])
         {
-            cout << i << ", ";
+            // cout << i << ", ";
         }
         cout << endl;
         MatrixXd polarcontext_candidate = polarcontexts_[candidate_indexes[candidate_iter_idx]];
