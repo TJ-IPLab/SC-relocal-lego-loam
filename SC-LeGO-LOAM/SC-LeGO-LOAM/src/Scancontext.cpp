@@ -246,12 +246,12 @@ double SCManager::distDirectSC(MatrixXd &_sc1, MatrixXd &_sc2)
             continue; // don't count this sector pair.
 
         double sector_similarity = col_sc1.dot(col_sc2) / (col_sc1.norm() * col_sc2.norm());
-        cout << sector_similarity << ", ";
+        // cout << sector_similarity << ", ";
 
         sum_sector_similarity = sum_sector_similarity + sector_similarity;
         num_eff_cols = num_eff_cols + 1;
     }
-    cout << "\n";
+    // cout << "\n";
 
     double sc_sim = sum_sector_similarity / num_eff_cols;
     return 1.0 - sc_sim;

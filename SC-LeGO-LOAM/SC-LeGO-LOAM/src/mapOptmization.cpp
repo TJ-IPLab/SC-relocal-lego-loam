@@ -1781,18 +1781,31 @@ public:
             // {
             //     relocal_tune = ndt_relocal.getFinalTransformation(); // get transformation in camera frame (because points are in camera frame)
 
-            pcl::PassThrough<PointType> pass;
-            pass.setInputCloud(thisRawCloudKeyFrame);
-            pass.setFilterFieldName("z");
-            pass.setFilterLimits(-1.2, 20);
-            //pass.setFilterLimitsNegative (true);
+            // pcl::PassThrough<PointType> pass;
+            // pass.setInputCloud(thisRawCloudKeyFrame);
+            // pass.setFilterFieldName("z");
+            // pass.setFilterLimits(-1.2, 20);
+            // //pass.setFilterLimitsNegative (true);
             pcl::PointCloud<PointType>::Ptr thisRawCloudKeyFrame_filtered(new pcl::PointCloud<PointType>());
-            pass.filter(*thisRawCloudKeyFrame_filtered);
+            // pass.filter(*thisRawCloudKeyFrame_filtered);
+            for (int passi = 0; passi < thisRawCloudKeyFrame->points.size(); passi++)
+            {
+                if (thisRawCloudKeyFrame->points[passi].z>-1.2 && thisRawCloudKeyFrame->points[passi].z<20)
+                    thisRawCloudKeyFrame_filtered->push_back(thisRawCloudKeyFrame->points[passi]);
+            }
 
-            pass.setInputCloud(resultpcd);
-            //pass.setFilterLimitsNegative (true);
+            // pcl::PassThrough<PointType> pass_target;
+            // pass_target.setInputCloud(resultpcd);
+            // pass_target.setFilterFieldName("z");
+            // pass_target.setFilterLimits(-1.2, 20);
+            // //pass.setFilterLimitsNegative (true);
             pcl::PointCloud<PointType>::Ptr resultpcd_filtered(new pcl::PointCloud<PointType>());
-            pass.filter(*resultpcd_filtered);
+            // pass_target.filter(*resultpcd_filtered);
+            for (int passi = 0; passi < resultpcd->points.size(); passi++)
+            {
+                if (resultpcd->points[passi].z>-1.2 && resultpcd->points[passi].z<20)
+                    resultpcd_filtered->push_back(resultpcd->points[passi]);
+            }
 
             pcl::IterativeClosestPoint<PointType, PointType> icp_relocal;
             icp_relocal.setMaxCorrespondenceDistance(100);
@@ -1965,36 +1978,36 @@ public:
                 pubRelocalCurscData.publish(cloudMsgTemp);
             }
 
-            /**
-----------------------------------------transform------------------------------------------------------
-                for (int trans = 0; trans < 21; ++trans)
-                {
-                    pcl::PointCloud<PointType>::Ptr copy(new pcl::PointCloud<PointType>());
-                    pcl::copyPointCloud(*resultpcd,  *copy);
-                for (int i = 0; i < copy->points.size(); i++)
-                {
-                    copy->points[i].y -= trans;
-                    copy->points[i].z -= 20;
-                }
 
-                sensor_msgs::PointCloud2 transformCloud;
-                pcl::toROSMsg(*copy, transformCloud);
-                transformCloud.header.stamp = ros::Time().fromSec(laserCloudRawTime);
-                transformCloud.header.frame_id = "/velodyne";
-                pubTransformCloud.publish(transformCloud);
+// ----------------------------------------transform------------------------------------------------------
+//                 for (int trans = 0; trans < 21; ++trans)
+//                 {
+//                     pcl::PointCloud<PointType>::Ptr copy(new pcl::PointCloud<PointType>());
+//                     pcl::copyPointCloud(*resultpcd,  *copy);
+//                 for (int i = 0; i < copy->points.size(); i++)
+//                 {
+//                     copy->points[i].y -= trans;
+//                     copy->points[i].z -= 20;
+//                 }
 
-                Eigen::MatrixXd sc = forTransform.makeScancontext(*copy);
-                cv::Mat sciForRedPoint = forTransform.createSci(sc);
-                char name[100];
-                sprintf(name,"transformPoint_y+%d",trans);
-                cv::Mat sciForRedPointAddAxes = forTransform.addAxes(sciForRedPoint,name);
-                cv::imshow("transform point",sciForRedPointAddAxes);
-                cv::waitKey(1);
-                sleep(1);
+//                 sensor_msgs::PointCloud2 transformCloud;
+//                 pcl::toROSMsg(*copy, transformCloud);
+//                 transformCloud.header.stamp = ros::Time().fromSec(laserCloudRawTime);
+//                 transformCloud.header.frame_id = "/velodyne";
+//                 pubTransformCloud.publish(transformCloud);
+
+//                 Eigen::MatrixXd sc = forTransform.makeScancontext(*copy);
+//                 cv::Mat sciForRedPoint = forTransform.createSci(sc);
+//                 char name[100];
+//                 sprintf(name,"transformPoint_y+%d",trans);
+//                 cv::Mat sciForRedPointAddAxes = forTransform.addAxes(sciForRedPoint,name);
+//                 cv::imshow("transform point",sciForRedPointAddAxes);
+//                 cv::waitKey(1);
+//                 sleep(1);
                
-                }
-----------------------------------------transform------------------------------------------------------
-**/
+//                 }
+// ----------------------------------------transform------------------------------------------------------
+
         }
         else
         {
@@ -2070,6 +2083,7 @@ public:
             }
             // cout << "------" << "currentFrameID: " << ++currentFrameID << "     failNumber: " << ++failNumber << "     mismatchNumber: "<< mismatchNumber << "------"<<endl;
         }
+
     }
 
     void visualizeGlobalMapThread()
